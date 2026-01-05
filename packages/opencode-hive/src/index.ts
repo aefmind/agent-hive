@@ -11,6 +11,7 @@ import { createDecisionLogTool, createDecisionListTool } from "./tools/decisionT
 import { createExecStartTool, createExecCompleteTool, createExecAbortTool, createExecRevertTool } from "./tools/execTools.js";
 import { createStatusTool } from "./tools/queryTools.js";
 import { PlanService } from "./services/planService.js";
+import { CommentService } from "./services/commentService.js";
 import { createPlanGenerateTool } from "./tools/planTools.js";
 import { createPlanReadTool, createPlanUpdateTool, createPlanApproveTool, createPlanLockTool } from "./tools/planManagementTools.js";
 
@@ -100,6 +101,7 @@ const plugin: Plugin = async (ctx) => {
 
   const statusService = new StatusService(featureService, stepService, decisionService);
   const planService = new PlanService(directory, featureService);
+  const commentService = new CommentService(directory);
 
   return {
     "experimental.chat.system.transform": async (_input: unknown, output: { system: string[] }) => {
@@ -121,7 +123,7 @@ const plugin: Plugin = async (ctx) => {
       hive_decision_log: createDecisionLogTool(decisionService, featureService),
       hive_decision_list: createDecisionListTool(decisionService, featureService),
 
-      hive_exec_start: createExecStartTool(worktreeService, stepService, featureService, directory),
+      hive_exec_start: createExecStartTool(worktreeService, stepService, featureService, directory, planService, commentService),
       hive_exec_complete: createExecCompleteTool(worktreeService, stepService, featureService, directory),
       hive_exec_abort: createExecAbortTool(worktreeService, stepService, featureService, directory),
       hive_exec_revert: createExecRevertTool(worktreeService, stepService, featureService, directory),
