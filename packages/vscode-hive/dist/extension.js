@@ -2711,6 +2711,29 @@ var HiveService = class {
   exists() {
     return fs.existsSync(this.basePath);
   }
+  detectFeatureVersion(featurePath) {
+    const tasksPath = path.join(featurePath, "tasks");
+    const executionPath = path.join(featurePath, "execution");
+    if (fs.existsSync(tasksPath)) {
+      return "v2";
+    }
+    if (fs.existsSync(executionPath)) {
+      return "v1";
+    }
+    return "v2";
+  }
+  getStepsPath(featurePath) {
+    const version = this.detectFeatureVersion(featurePath);
+    return version === "v2" ? path.join(featurePath, "tasks") : path.join(featurePath, "execution");
+  }
+  getDecisionsPath(featurePath) {
+    const version = this.detectFeatureVersion(featurePath);
+    const decisionsPath = path.join(featurePath, "context", "decisions");
+    if (version === "v2" && fs.existsSync(decisionsPath)) {
+      return decisionsPath;
+    }
+    return path.join(featurePath, "context");
+  }
   getFeatures() {
     const featuresPath = path.join(this.basePath, "features");
     if (!fs.existsSync(featuresPath)) return [];
@@ -2730,10 +2753,11 @@ var HiveService = class {
     return { name, progress, steps, stepsCount, doneCount, status, createdAt, completedAt };
   }
   getDecisions(feature) {
-    const contextPath = path.join(this.basePath, "features", feature, "context");
-    if (!fs.existsSync(contextPath)) return [];
-    return fs.readdirSync(contextPath).filter((f) => f.endsWith(".md")).map((filename) => {
-      const filePath = path.join(contextPath, filename);
+    const featurePath = path.join(this.basePath, "features", feature);
+    const decisionsPath = this.getDecisionsPath(featurePath);
+    if (!fs.existsSync(decisionsPath)) return [];
+    return fs.readdirSync(decisionsPath).filter((f) => f.endsWith(".md")).map((filename) => {
+      const filePath = path.join(decisionsPath, filename);
       const content = this.readFile(filePath);
       let title = filename.replace(/\.md$/, "");
       if (content) {
@@ -2744,13 +2768,14 @@ var HiveService = class {
     }).sort((a, b) => a.filename.localeCompare(b.filename));
   }
   getSteps(feature) {
-    const execPath = path.join(this.basePath, "features", feature, "execution");
-    if (!fs.existsSync(execPath)) return [];
-    return fs.readdirSync(execPath).filter((f) => {
-      const stat = fs.statSync(path.join(execPath, f));
+    const featurePath = path.join(this.basePath, "features", feature);
+    const stepsPath = this.getStepsPath(featurePath);
+    if (!fs.existsSync(stepsPath)) return [];
+    return fs.readdirSync(stepsPath).filter((f) => {
+      const stat = fs.statSync(path.join(stepsPath, f));
       return stat.isDirectory();
     }).map((folder) => {
-      const folderPath = path.join(execPath, folder);
+      const folderPath = path.join(stepsPath, folder);
       const statusPath = path.join(folderPath, "status.json");
       const status = this.readJson(statusPath);
       const specFiles = fs.readdirSync(folderPath).filter((f) => f.endsWith(".md"));
@@ -2809,13 +2834,17 @@ var HiveService = class {
     return result;
   }
   getStepReport(feature, stepFolder) {
-    const reportPath = path.join(this.basePath, "features", feature, "execution", stepFolder, "report.json");
+    const featurePath = path.join(this.basePath, "features", feature);
+    const stepsPath = this.getStepsPath(featurePath);
+    const reportPath = path.join(stepsPath, stepFolder, "report.json");
     const report = this.readJson(reportPath);
     if (!report?.diffStats) return null;
     return report.diffStats;
   }
   getStepDiffPath(feature, stepFolder) {
-    const diffPath = path.join(this.basePath, "features", feature, "execution", stepFolder, "output.diff");
+    const featurePath = path.join(this.basePath, "features", feature);
+    const stepsPath = this.getStepsPath(featurePath);
+    const diffPath = path.join(stepsPath, stepFolder, "output.diff");
     if (!fs.existsSync(diffPath)) return null;
     return diffPath;
   }
@@ -2833,37 +2862,102 @@ var HiveService = class {
     return `${hours}h ${remainingMinutes}m`;
   }
   getStepSpec(feature, stepFolder, specFile) {
-    const specPath = path.join(this.basePath, "features", feature, "execution", stepFolder, specFile);
+    const featurePath = path.join(this.basePath, "features", feature);
+    const stepsPath = this.getStepsPath(featurePath);
+    const specPath = path.join(stepsPath, stepFolder, specFile);
     return this.readFile(specPath);
   }
   getStepStatus(feature, stepFolder) {
-    const statusPath = path.join(this.basePath, "features", feature, "execution", stepFolder, "status.json");
+    const featurePath = path.join(this.basePath, "features", feature);
+    const stepsPath = this.getStepsPath(featurePath);
+    const statusPath = path.join(stepsPath, stepFolder, "status.json");
     return this.readJson(statusPath);
   }
-  getRequirements(feature) {
-    let folderPath = path.join(this.basePath, "features", feature, "requirements");
-    if (!fs.existsSync(folderPath)) {
-      folderPath = path.join(this.basePath, "features", feature, "problem");
+  getProblemContent(feature) {
+    const featurePath = path.join(this.basePath, "features", feature);
+    const problemPath = path.join(featurePath, "context", "problem.md");
+    if (fs.existsSync(problemPath)) {
+      return this.readFile(problemPath);
     }
+    const ticketPath = path.join(featurePath, "requirements", "ticket.md");
+    if (fs.existsSync(ticketPath)) {
+      return this.readFile(ticketPath);
+    }
+    const legacyProblemPath = path.join(featurePath, "problem", "ticket.md");
+    return this.readFile(legacyProblemPath);
+  }
+  getRequirements(feature) {
+    const ticket = this.getProblemContent(feature);
     return {
-      ticket: this.readFile(path.join(folderPath, "ticket.md")) ?? void 0,
-      requirements: this.readFile(path.join(folderPath, "requirements.md")) ?? void 0,
-      notes: this.readFile(path.join(folderPath, "notes.md")) ?? void 0
+      ticket: ticket ?? void 0,
+      requirements: void 0,
+      notes: void 0
     };
   }
   getContext(feature) {
-    const contextPath = path.join(this.basePath, "features", feature, "context");
+    const decisions = this.getDecisions(feature);
+    const decisionContent = decisions.length > 0 ? decisions.map((d) => `### ${d.title}`).join("\n\n") : void 0;
     return {
-      decisions: this.readFile(path.join(contextPath, "decisions.md")) ?? void 0,
-      architecture: this.readFile(path.join(contextPath, "architecture.md")) ?? void 0,
-      constraints: this.readFile(path.join(contextPath, "constraints.md")) ?? void 0
+      decisions: decisionContent,
+      architecture: void 0,
+      constraints: void 0
     };
   }
+  getPlanJson(feature) {
+    const featurePath = path.join(this.basePath, "features", feature);
+    const jsonPath = path.join(featurePath, "plan.json");
+    if (fs.existsSync(jsonPath)) {
+      return this.readJson(jsonPath);
+    }
+    return null;
+  }
+  getPlanContent(feature) {
+    const planJson = this.getPlanJson(feature);
+    if (planJson) {
+      return this.planJsonToMarkdown(planJson);
+    }
+    const legacyPath = path.join(this.basePath, "features", feature, "plan.md");
+    return this.readFile(legacyPath);
+  }
+  planJsonToMarkdown(plan) {
+    const lines = [];
+    lines.push(`# Implementation Plan`);
+    lines.push(``);
+    lines.push(`**Version**: ${plan.version}`);
+    lines.push(`**Status**: ${plan.status}`);
+    lines.push(`**Updated**: ${plan.updatedAt}`);
+    lines.push(``);
+    if (plan.summary) {
+      lines.push(`## Summary`);
+      lines.push(``);
+      lines.push(plan.summary);
+      lines.push(``);
+    }
+    if (plan.tasks.length > 0) {
+      lines.push(`## Tasks`);
+      lines.push(``);
+      for (const task of plan.tasks) {
+        const icon = task.status === "done" ? "\u2705" : task.status === "in_progress" ? "\u{1F504}" : task.status === "cancelled" ? "\u23ED\uFE0F" : "\u2B1C";
+        lines.push(`${icon} **${task.id}**: ${task.name}`);
+      }
+    }
+    return lines.join("\n");
+  }
   getFilesInFolder(feature, folder) {
-    let folderPath = path.join(this.basePath, "features", feature, folder);
+    const featurePath = path.join(this.basePath, "features", feature);
+    if (folder === "context") {
+      const decisionsPath = this.getDecisionsPath(featurePath);
+      if (fs.existsSync(decisionsPath)) {
+        return fs.readdirSync(decisionsPath).filter((f) => {
+          const stat = fs.statSync(path.join(decisionsPath, f));
+          return stat.isFile();
+        });
+      }
+    }
+    let folderPath = path.join(featurePath, folder);
     if (!fs.existsSync(folderPath)) {
       if (folder === "requirements") {
-        folderPath = path.join(this.basePath, "features", feature, "problem");
+        folderPath = path.join(featurePath, "problem");
       } else {
         return [];
       }
@@ -2875,18 +2969,32 @@ var HiveService = class {
     });
   }
   getFilePath(feature, folder, filename) {
+    const featurePath = path.join(this.basePath, "features", feature);
     if (folder === "requirements") {
-      const requirementsPath = path.join(this.basePath, "features", feature, "requirements");
+      const problemPath = path.join(featurePath, "context", "problem.md");
+      if (fs.existsSync(problemPath) && filename === "ticket.md") {
+        return problemPath;
+      }
+      const requirementsPath = path.join(featurePath, "requirements");
       if (fs.existsSync(requirementsPath)) {
         return path.join(requirementsPath, filename);
-      } else {
-        return path.join(this.basePath, "features", feature, "problem", filename);
       }
+      return path.join(featurePath, "problem", filename);
     }
-    return path.join(this.basePath, "features", feature, folder, filename);
+    if (folder === "context") {
+      const decisionsPath = this.getDecisionsPath(featurePath);
+      return path.join(decisionsPath, filename);
+    }
+    if (folder === "execution") {
+      const stepsPath = this.getStepsPath(featurePath);
+      return path.join(stepsPath, filename);
+    }
+    return path.join(featurePath, folder, filename);
   }
   getStepFilePath(feature, stepFolder, filename) {
-    return path.join(this.basePath, "features", feature, "execution", stepFolder, filename);
+    const featurePath = path.join(this.basePath, "features", feature);
+    const stepsPath = this.getStepsPath(featurePath);
+    return path.join(stepsPath, stepFolder, filename);
   }
   getFeaturePath(feature) {
     return path.join(this.basePath, "features", feature);
@@ -2921,7 +3029,9 @@ ${requirements.ticket || "(no ticket)"}
     return report;
   }
   updateStepSession(feature, stepFolder, sessionId) {
-    const statusPath = path.join(this.basePath, "features", feature, "execution", stepFolder, "status.json");
+    const featurePath = path.join(this.basePath, "features", feature);
+    const stepsPath = this.getStepsPath(featurePath);
+    const statusPath = path.join(stepsPath, stepFolder, "status.json");
     const status = this.readJson(statusPath);
     if (!status) return false;
     status.sessionId = sessionId;

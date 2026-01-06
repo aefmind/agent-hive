@@ -1,6 +1,6 @@
 import * as fs from 'fs'
 import * as path from 'path'
-import { Feature, Step, StepStatus, RequirementsDocs, ContextDocs, Batch, StepReport, ExecutionInfo } from '../types'
+import { Feature, Step, StepStatus, RequirementsDocs, ContextDocs, Batch, StepReport, ExecutionInfo, PlanJson } from '../types'
 
 export interface SessionItem {
   id: string
@@ -20,6 +20,36 @@ export class HiveService {
 
   exists(): boolean {
     return fs.existsSync(this.basePath)
+  }
+
+  private detectFeatureVersion(featurePath: string): 'v1' | 'v2' {
+    const tasksPath = path.join(featurePath, 'tasks')
+    const executionPath = path.join(featurePath, 'execution')
+    
+    if (fs.existsSync(tasksPath)) {
+      return 'v2'
+    }
+    if (fs.existsSync(executionPath)) {
+      return 'v1'
+    }
+    return 'v2'
+  }
+
+  private getStepsPath(featurePath: string): string {
+    const version = this.detectFeatureVersion(featurePath)
+    return version === 'v2' 
+      ? path.join(featurePath, 'tasks')
+      : path.join(featurePath, 'execution')
+  }
+
+  private getDecisionsPath(featurePath: string): string {
+    const version = this.detectFeatureVersion(featurePath)
+    const decisionsPath = path.join(featurePath, 'context', 'decisions')
+    
+    if (version === 'v2' && fs.existsSync(decisionsPath)) {
+      return decisionsPath
+    }
+    return path.join(featurePath, 'context')
   }
 
   getFeatures(): Feature[] {
@@ -48,13 +78,14 @@ export class HiveService {
   }
 
   getDecisions(feature: string): { filename: string; title: string; filePath: string }[] {
-    const contextPath = path.join(this.basePath, 'features', feature, 'context')
-    if (!fs.existsSync(contextPath)) return []
+    const featurePath = path.join(this.basePath, 'features', feature)
+    const decisionsPath = this.getDecisionsPath(featurePath)
+    if (!fs.existsSync(decisionsPath)) return []
 
-    return fs.readdirSync(contextPath)
+    return fs.readdirSync(decisionsPath)
       .filter(f => f.endsWith('.md'))
       .map(filename => {
-        const filePath = path.join(contextPath, filename)
+        const filePath = path.join(decisionsPath, filename)
         const content = this.readFile(filePath)
         let title = filename.replace(/\.md$/, '')
         if (content) {
@@ -67,16 +98,17 @@ export class HiveService {
   }
 
   getSteps(feature: string): Step[] {
-    const execPath = path.join(this.basePath, 'features', feature, 'execution')
-    if (!fs.existsSync(execPath)) return []
+    const featurePath = path.join(this.basePath, 'features', feature)
+    const stepsPath = this.getStepsPath(featurePath)
+    if (!fs.existsSync(stepsPath)) return []
 
-    return fs.readdirSync(execPath)
+    return fs.readdirSync(stepsPath)
       .filter(f => {
-        const stat = fs.statSync(path.join(execPath, f))
+        const stat = fs.statSync(path.join(stepsPath, f))
         return stat.isDirectory()
       })
       .map(folder => {
-        const folderPath = path.join(execPath, folder)
+        const folderPath = path.join(stepsPath, folder)
         const statusPath = path.join(folderPath, 'status.json')
         const status = this.readJson<StepStatus>(statusPath)
         
@@ -149,14 +181,18 @@ export class HiveService {
   }
 
   getStepReport(feature: string, stepFolder: string): StepReport | null {
-    const reportPath = path.join(this.basePath, 'features', feature, 'execution', stepFolder, 'report.json')
+    const featurePath = path.join(this.basePath, 'features', feature)
+    const stepsPath = this.getStepsPath(featurePath)
+    const reportPath = path.join(stepsPath, stepFolder, 'report.json')
     const report = this.readJson<{ diffStats?: StepReport }>(reportPath)
     if (!report?.diffStats) return null
     return report.diffStats
   }
 
   getStepDiffPath(feature: string, stepFolder: string): string | null {
-    const diffPath = path.join(this.basePath, 'features', feature, 'execution', stepFolder, 'output.diff')
+    const featurePath = path.join(this.basePath, 'features', feature)
+    const stepsPath = this.getStepsPath(featurePath)
+    const diffPath = path.join(stepsPath, stepFolder, 'output.diff')
     if (!fs.existsSync(diffPath)) return null
     return diffPath
   }
@@ -177,41 +213,126 @@ export class HiveService {
   }
 
   getStepSpec(feature: string, stepFolder: string, specFile: string): string | null {
-    const specPath = path.join(this.basePath, 'features', feature, 'execution', stepFolder, specFile)
+    const featurePath = path.join(this.basePath, 'features', feature)
+    const stepsPath = this.getStepsPath(featurePath)
+    const specPath = path.join(stepsPath, stepFolder, specFile)
     return this.readFile(specPath)
   }
 
   getStepStatus(feature: string, stepFolder: string): StepStatus | null {
-    const statusPath = path.join(this.basePath, 'features', feature, 'execution', stepFolder, 'status.json')
+    const featurePath = path.join(this.basePath, 'features', feature)
+    const stepsPath = this.getStepsPath(featurePath)
+    const statusPath = path.join(stepsPath, stepFolder, 'status.json')
     return this.readJson<StepStatus>(statusPath)
   }
 
-  getRequirements(feature: string): RequirementsDocs {
-    let folderPath = path.join(this.basePath, 'features', feature, 'requirements')
-    if (!fs.existsSync(folderPath)) {
-      folderPath = path.join(this.basePath, 'features', feature, 'problem')
+  getProblemContent(feature: string): string | null {
+    const featurePath = path.join(this.basePath, 'features', feature)
+    
+    const problemPath = path.join(featurePath, 'context', 'problem.md')
+    if (fs.existsSync(problemPath)) {
+      return this.readFile(problemPath)
     }
+    
+    const ticketPath = path.join(featurePath, 'requirements', 'ticket.md')
+    if (fs.existsSync(ticketPath)) {
+      return this.readFile(ticketPath)
+    }
+    
+    const legacyProblemPath = path.join(featurePath, 'problem', 'ticket.md')
+    return this.readFile(legacyProblemPath)
+  }
+
+  getRequirements(feature: string): RequirementsDocs {
+    const ticket = this.getProblemContent(feature)
     return {
-      ticket: this.readFile(path.join(folderPath, 'ticket.md')) ?? undefined,
-      requirements: this.readFile(path.join(folderPath, 'requirements.md')) ?? undefined,
-      notes: this.readFile(path.join(folderPath, 'notes.md')) ?? undefined
+      ticket: ticket ?? undefined,
+      requirements: undefined,
+      notes: undefined
     }
   }
 
   getContext(feature: string): ContextDocs {
-    const contextPath = path.join(this.basePath, 'features', feature, 'context')
+    const decisions = this.getDecisions(feature)
+    const decisionContent = decisions.length > 0 
+      ? decisions.map(d => `### ${d.title}`).join('\n\n')
+      : undefined
+    
     return {
-      decisions: this.readFile(path.join(contextPath, 'decisions.md')) ?? undefined,
-      architecture: this.readFile(path.join(contextPath, 'architecture.md')) ?? undefined,
-      constraints: this.readFile(path.join(contextPath, 'constraints.md')) ?? undefined
+      decisions: decisionContent,
+      architecture: undefined,
+      constraints: undefined
     }
   }
 
+  getPlanJson(feature: string): PlanJson | null {
+    const featurePath = path.join(this.basePath, 'features', feature)
+    
+    const jsonPath = path.join(featurePath, 'plan.json')
+    if (fs.existsSync(jsonPath)) {
+      return this.readJson<PlanJson>(jsonPath)
+    }
+    
+    return null
+  }
+
+  getPlanContent(feature: string): string | null {
+    const planJson = this.getPlanJson(feature)
+    if (planJson) {
+      return this.planJsonToMarkdown(planJson)
+    }
+    
+    const legacyPath = path.join(this.basePath, 'features', feature, 'plan.md')
+    return this.readFile(legacyPath)
+  }
+
+  private planJsonToMarkdown(plan: PlanJson): string {
+    const lines: string[] = []
+    lines.push(`# Implementation Plan`)
+    lines.push(``)
+    lines.push(`**Version**: ${plan.version}`)
+    lines.push(`**Status**: ${plan.status}`)
+    lines.push(`**Updated**: ${plan.updatedAt}`)
+    lines.push(``)
+    
+    if (plan.summary) {
+      lines.push(`## Summary`)
+      lines.push(``)
+      lines.push(plan.summary)
+      lines.push(``)
+    }
+    
+    if (plan.tasks.length > 0) {
+      lines.push(`## Tasks`)
+      lines.push(``)
+      for (const task of plan.tasks) {
+        const icon = task.status === 'done' ? '✅' :
+                     task.status === 'in_progress' ? '🔄' :
+                     task.status === 'cancelled' ? '⏭️' : '⬜'
+        lines.push(`${icon} **${task.id}**: ${task.name}`)
+      }
+    }
+    
+    return lines.join('\n')
+  }
+
   getFilesInFolder(feature: string, folder: 'requirements' | 'context'): string[] {
-    let folderPath = path.join(this.basePath, 'features', feature, folder)
+    const featurePath = path.join(this.basePath, 'features', feature)
+    
+    if (folder === 'context') {
+      const decisionsPath = this.getDecisionsPath(featurePath)
+      if (fs.existsSync(decisionsPath)) {
+        return fs.readdirSync(decisionsPath).filter(f => {
+          const stat = fs.statSync(path.join(decisionsPath, f))
+          return stat.isFile()
+        })
+      }
+    }
+    
+    let folderPath = path.join(featurePath, folder)
     if (!fs.existsSync(folderPath)) {
       if (folder === 'requirements') {
-        folderPath = path.join(this.basePath, 'features', feature, 'problem')
+        folderPath = path.join(featurePath, 'problem')
       } else {
         return []
       }
@@ -224,19 +345,37 @@ export class HiveService {
   }
 
   getFilePath(feature: string, folder: 'requirements' | 'context' | 'execution', filename: string): string {
+    const featurePath = path.join(this.basePath, 'features', feature)
+    
     if (folder === 'requirements') {
-      const requirementsPath = path.join(this.basePath, 'features', feature, 'requirements')
+      const problemPath = path.join(featurePath, 'context', 'problem.md')
+      if (fs.existsSync(problemPath) && filename === 'ticket.md') {
+        return problemPath
+      }
+      const requirementsPath = path.join(featurePath, 'requirements')
       if (fs.existsSync(requirementsPath)) {
         return path.join(requirementsPath, filename)
-      } else {
-        return path.join(this.basePath, 'features', feature, 'problem', filename)
       }
+      return path.join(featurePath, 'problem', filename)
     }
-    return path.join(this.basePath, 'features', feature, folder, filename)
+    
+    if (folder === 'context') {
+      const decisionsPath = this.getDecisionsPath(featurePath)
+      return path.join(decisionsPath, filename)
+    }
+    
+    if (folder === 'execution') {
+      const stepsPath = this.getStepsPath(featurePath)
+      return path.join(stepsPath, filename)
+    }
+    
+    return path.join(featurePath, folder, filename)
   }
 
   getStepFilePath(feature: string, stepFolder: string, filename: string): string {
-    return path.join(this.basePath, 'features', feature, 'execution', stepFolder, filename)
+    const featurePath = path.join(this.basePath, 'features', feature)
+    const stepsPath = this.getStepsPath(featurePath)
+    return path.join(stepsPath, stepFolder, filename)
   }
 
   getFeaturePath(feature: string): string {
@@ -270,7 +409,9 @@ export class HiveService {
   }
 
   updateStepSession(feature: string, stepFolder: string, sessionId: string): boolean {
-    const statusPath = path.join(this.basePath, 'features', feature, 'execution', stepFolder, 'status.json')
+    const featurePath = path.join(this.basePath, 'features', feature)
+    const stepsPath = this.getStepsPath(featurePath)
+    const statusPath = path.join(stepsPath, stepFolder, 'status.json')
     const status = this.readJson<StepStatus>(statusPath)
     if (!status) return false
     
