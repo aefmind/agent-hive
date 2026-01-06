@@ -13,6 +13,8 @@ export interface SessionInfo {
 
 export type StepStatusType = "pending" | "in_progress" | "done" | "blocked" | "reverted" | "failed" | "cancelled";
 
+export type TaskStatusType = StepStatusType;
+
 export interface StepStatus {
   name: string;
   order: number;
@@ -28,7 +30,7 @@ export interface StepStatus {
   };
 }
 
-export type PlanStatusType = "draft" | "approved" | "locked";
+export type PlanStatusType = "draft" | "review" | "approved" | "locked";
 
 export interface PlanMetadata {
   version: number;
@@ -37,6 +39,31 @@ export interface PlanMetadata {
   lastUpdatedAt: string;
   approvedAt: string | null;
   approvedBy: "user" | null;
+}
+
+export interface PlanTask {
+  id: string;
+  order: number;
+  name: string;
+  status: TaskStatusType;
+  spec: string;
+  dependencies?: string[];
+}
+
+export interface PlanDecision {
+  title: string;
+  file: string;
+  loggedAt?: string;
+}
+
+export interface PlanJson {
+  version: number;
+  status: PlanStatusType;
+  createdAt: string;
+  updatedAt: string;
+  summary: string;
+  tasks: PlanTask[];
+  decisions: PlanDecision[];
 }
 
 export interface FeatureStatus {

@@ -33,16 +33,16 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// ../../node_modules/@opencode-ai/sdk/dist/gen/types.gen.js
+// ../../../../../../node_modules/@opencode-ai/sdk/dist/gen/types.gen.js
 var init_types_gen = __esm({
-  "../../node_modules/@opencode-ai/sdk/dist/gen/types.gen.js"() {
+  "../../../../../../node_modules/@opencode-ai/sdk/dist/gen/types.gen.js"() {
   }
 });
 
-// ../../node_modules/@opencode-ai/sdk/dist/gen/core/serverSentEvents.gen.js
+// ../../../../../../node_modules/@opencode-ai/sdk/dist/gen/core/serverSentEvents.gen.js
 var createSseClient;
 var init_serverSentEvents_gen = __esm({
-  "../../node_modules/@opencode-ai/sdk/dist/gen/core/serverSentEvents.gen.js"() {
+  "../../../../../../node_modules/@opencode-ai/sdk/dist/gen/core/serverSentEvents.gen.js"() {
     createSseClient = ({ onSseError, onSseEvent, responseTransformer, responseValidator, sseDefaultRetryDelay, sseMaxRetryAttempts, sseMaxRetryDelay, sseSleepFn, url, ...options }) => {
       let lastEventId;
       const sleep = sseSleepFn ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
@@ -150,10 +150,10 @@ var init_serverSentEvents_gen = __esm({
   }
 });
 
-// ../../node_modules/@opencode-ai/sdk/dist/gen/core/auth.gen.js
+// ../../../../../../node_modules/@opencode-ai/sdk/dist/gen/core/auth.gen.js
 var getAuthToken;
 var init_auth_gen = __esm({
-  "../../node_modules/@opencode-ai/sdk/dist/gen/core/auth.gen.js"() {
+  "../../../../../../node_modules/@opencode-ai/sdk/dist/gen/core/auth.gen.js"() {
     getAuthToken = async (auth, callback) => {
       const token = typeof callback === "function" ? await callback(auth) : callback;
       if (!token) {
@@ -170,20 +170,20 @@ var init_auth_gen = __esm({
   }
 });
 
-// ../../node_modules/@opencode-ai/sdk/dist/gen/core/bodySerializer.gen.js
+// ../../../../../../node_modules/@opencode-ai/sdk/dist/gen/core/bodySerializer.gen.js
 var jsonBodySerializer;
 var init_bodySerializer_gen = __esm({
-  "../../node_modules/@opencode-ai/sdk/dist/gen/core/bodySerializer.gen.js"() {
+  "../../../../../../node_modules/@opencode-ai/sdk/dist/gen/core/bodySerializer.gen.js"() {
     jsonBodySerializer = {
       bodySerializer: (body) => JSON.stringify(body, (_key, value) => typeof value === "bigint" ? value.toString() : value)
     };
   }
 });
 
-// ../../node_modules/@opencode-ai/sdk/dist/gen/core/pathSerializer.gen.js
+// ../../../../../../node_modules/@opencode-ai/sdk/dist/gen/core/pathSerializer.gen.js
 var separatorArrayExplode, separatorArrayNoExplode, separatorObjectExplode, serializeArrayParam, serializePrimitiveParam, serializeObjectParam;
 var init_pathSerializer_gen = __esm({
-  "../../node_modules/@opencode-ai/sdk/dist/gen/core/pathSerializer.gen.js"() {
+  "../../../../../../node_modules/@opencode-ai/sdk/dist/gen/core/pathSerializer.gen.js"() {
     separatorArrayExplode = (style) => {
       switch (style) {
         case "label":
@@ -288,10 +288,10 @@ var init_pathSerializer_gen = __esm({
   }
 });
 
-// ../../node_modules/@opencode-ai/sdk/dist/gen/core/utils.gen.js
+// ../../../../../../node_modules/@opencode-ai/sdk/dist/gen/core/utils.gen.js
 var PATH_PARAM_RE, defaultPathSerializer, getUrl;
 var init_utils_gen = __esm({
-  "../../node_modules/@opencode-ai/sdk/dist/gen/core/utils.gen.js"() {
+  "../../../../../../node_modules/@opencode-ai/sdk/dist/gen/core/utils.gen.js"() {
     init_pathSerializer_gen();
     PATH_PARAM_RE = /\{[^{}]+\}/g;
     defaultPathSerializer = ({ path: path7, url: _url }) => {
@@ -362,10 +362,10 @@ var init_utils_gen = __esm({
   }
 });
 
-// ../../node_modules/@opencode-ai/sdk/dist/gen/client/utils.gen.js
+// ../../../../../../node_modules/@opencode-ai/sdk/dist/gen/client/utils.gen.js
 var createQuerySerializer, getParseAs, checkForExistence, setAuthParams, buildUrl, mergeConfigs, mergeHeaders, Interceptors, createInterceptors, defaultQuerySerializer, defaultHeaders, createConfig;
 var init_utils_gen2 = __esm({
-  "../../node_modules/@opencode-ai/sdk/dist/gen/client/utils.gen.js"() {
+  "../../../../../../node_modules/@opencode-ai/sdk/dist/gen/client/utils.gen.js"() {
     init_auth_gen();
     init_bodySerializer_gen();
     init_pathSerializer_gen();
@@ -578,10 +578,10 @@ var init_utils_gen2 = __esm({
   }
 });
 
-// ../../node_modules/@opencode-ai/sdk/dist/gen/client/client.gen.js
+// ../../../../../../node_modules/@opencode-ai/sdk/dist/gen/client/client.gen.js
 var createClient;
 var init_client_gen = __esm({
-  "../../node_modules/@opencode-ai/sdk/dist/gen/client/client.gen.js"() {
+  "../../../../../../node_modules/@opencode-ai/sdk/dist/gen/client/client.gen.js"() {
     init_serverSentEvents_gen();
     init_utils_gen2();
     createClient = (config = {}) => {
@@ -734,10 +734,10 @@ var init_client_gen = __esm({
   }
 });
 
-// ../../node_modules/@opencode-ai/sdk/dist/gen/core/params.gen.js
+// ../../../../../../node_modules/@opencode-ai/sdk/dist/gen/core/params.gen.js
 var extraPrefixesMap, extraPrefixes;
 var init_params_gen = __esm({
-  "../../node_modules/@opencode-ai/sdk/dist/gen/core/params.gen.js"() {
+  "../../../../../../node_modules/@opencode-ai/sdk/dist/gen/core/params.gen.js"() {
     extraPrefixesMap = {
       $body_: "body",
       $headers_: "headers",
@@ -748,9 +748,9 @@ var init_params_gen = __esm({
   }
 });
 
-// ../../node_modules/@opencode-ai/sdk/dist/gen/client/index.js
+// ../../../../../../node_modules/@opencode-ai/sdk/dist/gen/client/index.js
 var init_client = __esm({
-  "../../node_modules/@opencode-ai/sdk/dist/gen/client/index.js"() {
+  "../../../../../../node_modules/@opencode-ai/sdk/dist/gen/client/index.js"() {
     init_bodySerializer_gen();
     init_params_gen();
     init_client_gen();
@@ -758,10 +758,10 @@ var init_client = __esm({
   }
 });
 
-// ../../node_modules/@opencode-ai/sdk/dist/gen/client.gen.js
+// ../../../../../../node_modules/@opencode-ai/sdk/dist/gen/client.gen.js
 var client;
 var init_client_gen2 = __esm({
-  "../../node_modules/@opencode-ai/sdk/dist/gen/client.gen.js"() {
+  "../../../../../../node_modules/@opencode-ai/sdk/dist/gen/client.gen.js"() {
     init_client();
     client = createClient(createConfig({
       baseUrl: "http://localhost:4096"
@@ -769,10 +769,10 @@ var init_client_gen2 = __esm({
   }
 });
 
-// ../../node_modules/@opencode-ai/sdk/dist/gen/sdk.gen.js
+// ../../../../../../node_modules/@opencode-ai/sdk/dist/gen/sdk.gen.js
 var _HeyApiClient, Global, Project, Pty, Config, Tool, Instance, Path, Vcs, Session, Command, Oauth, Provider, Find, File, App, Auth, Mcp, Lsp, Formatter, Control, Tui, Event, OpencodeClient;
 var init_sdk_gen = __esm({
-  "../../node_modules/@opencode-ai/sdk/dist/gen/sdk.gen.js"() {
+  "../../../../../../node_modules/@opencode-ai/sdk/dist/gen/sdk.gen.js"() {
     init_client_gen2();
     _HeyApiClient = class {
       _client = client;
@@ -1656,7 +1656,7 @@ var init_sdk_gen = __esm({
   }
 });
 
-// ../../node_modules/@opencode-ai/sdk/dist/client.js
+// ../../../../../../node_modules/@opencode-ai/sdk/dist/client.js
 function createOpencodeClient(config) {
   if (!config?.fetch) {
     const customFetch = (req) => {
@@ -1678,14 +1678,14 @@ function createOpencodeClient(config) {
   return new OpencodeClient({ client: client2 });
 }
 var init_client2 = __esm({
-  "../../node_modules/@opencode-ai/sdk/dist/client.js"() {
+  "../../../../../../node_modules/@opencode-ai/sdk/dist/client.js"() {
     init_types_gen();
     init_client_gen();
     init_sdk_gen();
   }
 });
 
-// ../../node_modules/@opencode-ai/sdk/dist/server.js
+// ../../../../../../node_modules/@opencode-ai/sdk/dist/server.js
 async function createOpencodeServer(options) {
   options = Object.assign({
     hostname: "127.0.0.1",
@@ -1782,12 +1782,12 @@ function createOpencodeTui(options) {
 }
 var import_node_child_process;
 var init_server = __esm({
-  "../../node_modules/@opencode-ai/sdk/dist/server.js"() {
+  "../../../../../../node_modules/@opencode-ai/sdk/dist/server.js"() {
     import_node_child_process = require("node:child_process");
   }
 });
 
-// ../../node_modules/@opencode-ai/sdk/dist/index.js
+// ../../../../../../node_modules/@opencode-ai/sdk/dist/index.js
 var dist_exports = {};
 __export(dist_exports, {
   OpencodeClient: () => OpencodeClient,
@@ -1809,7 +1809,7 @@ async function createOpencode(options) {
   };
 }
 var init_dist = __esm({
-  "../../node_modules/@opencode-ai/sdk/dist/index.js"() {
+  "../../../../../../node_modules/@opencode-ai/sdk/dist/index.js"() {
     init_client2();
     init_server();
     init_client2();
@@ -1817,9 +1817,9 @@ var init_dist = __esm({
   }
 });
 
-// ../../node_modules/ms/index.js
+// ../../../../../../node_modules/ms/index.js
 var require_ms = __commonJS({
-  "../../node_modules/ms/index.js"(exports2, module2) {
+  "../../../../../../node_modules/ms/index.js"(exports2, module2) {
     var s = 1e3;
     var m = s * 60;
     var h = m * 60;
@@ -1933,9 +1933,9 @@ var require_ms = __commonJS({
   }
 });
 
-// ../../node_modules/debug/src/common.js
+// ../../../../../../node_modules/debug/src/common.js
 var require_common = __commonJS({
-  "../../node_modules/debug/src/common.js"(exports2, module2) {
+  "../../../../../../node_modules/debug/src/common.js"(exports2, module2) {
     function setup(env) {
       createDebug.debug = createDebug;
       createDebug.default = createDebug;
@@ -2110,9 +2110,9 @@ var require_common = __commonJS({
   }
 });
 
-// ../../node_modules/debug/src/browser.js
+// ../../../../../../node_modules/debug/src/browser.js
 var require_browser = __commonJS({
-  "../../node_modules/debug/src/browser.js"(exports2, module2) {
+  "../../../../../../node_modules/debug/src/browser.js"(exports2, module2) {
     exports2.formatArgs = formatArgs;
     exports2.save = save;
     exports2.load = load;
@@ -2280,9 +2280,9 @@ var require_browser = __commonJS({
   }
 });
 
-// ../../../node_modules/has-flag/index.js
+// ../../../../../../../node_modules/has-flag/index.js
 var require_has_flag = __commonJS({
-  "../../../node_modules/has-flag/index.js"(exports2, module2) {
+  "../../../../../../../node_modules/has-flag/index.js"(exports2, module2) {
     "use strict";
     module2.exports = (flag, argv = process.argv) => {
       const prefix = flag.startsWith("-") ? "" : flag.length === 1 ? "-" : "--";
@@ -2293,9 +2293,9 @@ var require_has_flag = __commonJS({
   }
 });
 
-// ../../../node_modules/supports-color/index.js
+// ../../../../../../../node_modules/supports-color/index.js
 var require_supports_color = __commonJS({
-  "../../../node_modules/supports-color/index.js"(exports2, module2) {
+  "../../../../../../../node_modules/supports-color/index.js"(exports2, module2) {
     "use strict";
     var os = require("os");
     var tty = require("tty");
@@ -2407,9 +2407,9 @@ var require_supports_color = __commonJS({
   }
 });
 
-// ../../node_modules/debug/src/node.js
+// ../../../../../../node_modules/debug/src/node.js
 var require_node = __commonJS({
-  "../../node_modules/debug/src/node.js"(exports2, module2) {
+  "../../../../../../node_modules/debug/src/node.js"(exports2, module2) {
     var tty = require("tty");
     var util = require("util");
     exports2.init = init;
@@ -2581,9 +2581,9 @@ var require_node = __commonJS({
   }
 });
 
-// ../../node_modules/debug/src/index.js
+// ../../../../../../node_modules/debug/src/index.js
 var require_src = __commonJS({
-  "../../node_modules/debug/src/index.js"(exports2, module2) {
+  "../../../../../../node_modules/debug/src/index.js"(exports2, module2) {
     if (typeof process === "undefined" || process.type === "renderer" || process.browser === true || process.__nwjs) {
       module2.exports = require_browser();
     } else {
@@ -2592,9 +2592,9 @@ var require_src = __commonJS({
   }
 });
 
-// ../../node_modules/@kwsites/file-exists/dist/src/index.js
+// ../../../../../../node_modules/@kwsites/file-exists/dist/src/index.js
 var require_src2 = __commonJS({
-  "../../node_modules/@kwsites/file-exists/dist/src/index.js"(exports2) {
+  "../../../../../../node_modules/@kwsites/file-exists/dist/src/index.js"(exports2) {
     "use strict";
     var __importDefault = exports2 && exports2.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -2636,9 +2636,9 @@ var require_src2 = __commonJS({
   }
 });
 
-// ../../node_modules/@kwsites/file-exists/dist/index.js
+// ../../../../../../node_modules/@kwsites/file-exists/dist/index.js
 var require_dist = __commonJS({
-  "../../node_modules/@kwsites/file-exists/dist/index.js"(exports2) {
+  "../../../../../../node_modules/@kwsites/file-exists/dist/index.js"(exports2) {
     "use strict";
     function __export3(m) {
       for (var p in m) if (!exports2.hasOwnProperty(p)) exports2[p] = m[p];
@@ -2648,9 +2648,9 @@ var require_dist = __commonJS({
   }
 });
 
-// ../../node_modules/@kwsites/promise-deferred/dist/index.js
+// ../../../../../../node_modules/@kwsites/promise-deferred/dist/index.js
 var require_dist2 = __commonJS({
-  "../../node_modules/@kwsites/promise-deferred/dist/index.js"(exports2) {
+  "../../../../../../node_modules/@kwsites/promise-deferred/dist/index.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.createDeferred = exports2.deferred = void 0;
@@ -3152,7 +3152,7 @@ Begin by acknowledging this step and asking any clarifying questions.`;
 var fs3 = __toESM(require("fs"));
 var path3 = __toESM(require("path"));
 
-// ../../node_modules/simple-git/dist/esm/index.js
+// ../../../../../../node_modules/simple-git/dist/esm/index.js
 var import_node_buffer = require("node:buffer");
 var import_file_exists = __toESM(require_dist(), 1);
 var import_debug = __toESM(require_src(), 1);

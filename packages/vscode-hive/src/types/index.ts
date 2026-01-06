@@ -70,3 +70,31 @@ export interface ContextDocs {
   architecture?: string
   constraints?: string
 }
+
+export type PlanStatusType = 'draft' | 'review' | 'approved' | 'locked'
+export type TaskStatusType = 'pending' | 'in_progress' | 'done' | 'blocked' | 'reverted' | 'failed' | 'cancelled'
+
+export interface PlanTask {
+  id: string
+  order: number
+  name: string
+  status: TaskStatusType
+  spec: string
+  dependencies?: string[]
+}
+
+export interface PlanDecision {
+  title: string
+  file: string
+  loggedAt?: string
+}
+
+export interface PlanJson {
+  version: number
+  status: PlanStatusType
+  createdAt: string
+  updatedAt: string
+  summary: string
+  tasks: PlanTask[]
+  decisions: PlanDecision[]
+}
