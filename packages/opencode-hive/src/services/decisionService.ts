@@ -3,6 +3,7 @@ import * as path from "path";
 import {
   getFeaturePath,
   getContextPath,
+  getDecisionsPath,
   getDecisionFilename,
 } from "../utils/paths.js";
 import { ensureDir, readFile, fileExists, readJson } from "../utils/json.js";
@@ -44,25 +45,23 @@ export class DecisionService {
     }
 
     const featurePath = getFeaturePath(this.directory, featureName);
-    const contextPath = getContextPath(featurePath);
+    const decisionsPath = getDecisionsPath(featurePath);
     const filename = getDecisionFilename(title);
-    const decisionPath = path.join(contextPath, filename);
+    const decisionPath = path.join(decisionsPath, filename);
 
     const fullContent = `# ${title}\n\n_Logged: ${new Date().toISOString()}_\n\n${content}`;
-    await ensureDir(contextPath);
+    await ensureDir(decisionsPath);
     await fs.writeFile(decisionPath, fullContent);
 
     return { filename };
   }
 
-  async list(featureName: string): Promise<Decision[]> {
-    const contextPath = getContextPath(getFeaturePath(this.directory, featureName));
+  private async readDecisionsFromDir(dirPath: string): Promise<Decision[]> {
     const decisions: Decision[] = [];
-
     try {
-      const files = await fs.readdir(contextPath);
+      const files = await fs.readdir(dirPath);
       for (const file of files.filter((f) => f.endsWith(".md")).sort()) {
-        const content = await fs.readFile(path.join(contextPath, file), "utf-8");
+        const content = await fs.readFile(path.join(dirPath, file), "utf-8");
         const titleMatch = content.match(/^#\s+(.+)$/m);
         const title = titleMatch?.[1] || file.replace(".md", "");
         const loggedAtMatch = content.match(/_Logged:\s+(.+)_/);
@@ -76,15 +75,36 @@ export class DecisionService {
         });
       }
     } catch {}
-
     return decisions;
   }
 
-  async read(featureName: string, filename: string): Promise<Decision | null> {
-    const contextPath = getContextPath(getFeaturePath(this.directory, featureName));
-    const decisionPath = path.join(contextPath, filename);
+  async list(featureName: string): Promise<Decision[]> {
+    const featurePath = getFeaturePath(this.directory, featureName);
+    const decisionsPath = getDecisionsPath(featurePath);
+    const legacyContextPath = getContextPath(featurePath);
 
-    const exists = await fileExists(decisionPath);
+    const newDecisions = await this.readDecisionsFromDir(decisionsPath);
+
+    if (newDecisions.length > 0) {
+      return newDecisions;
+    }
+
+    return this.readDecisionsFromDir(legacyContextPath);
+  }
+
+  async read(featureName: string, filename: string): Promise<Decision | null> {
+    const featurePath = getFeaturePath(this.directory, featureName);
+    const decisionsPath = getDecisionsPath(featurePath);
+    const legacyContextPath = getContextPath(featurePath);
+
+    let decisionPath = path.join(decisionsPath, filename);
+    let exists = await fileExists(decisionPath);
+
+    if (!exists) {
+      decisionPath = path.join(legacyContextPath, filename);
+      exists = await fileExists(decisionPath);
+    }
+
     if (!exists) {
       return null;
     }
@@ -112,5 +132,32 @@ export class DecisionService {
 
     const summaries = decisions.map((d) => `- **${d.title}**`);
     return summaries.join("\n");
+  }
+
+  async migrateDecisions(featureName: string): Promise<{ migrated: number }> {
+    const featurePath = getFeaturePath(this.directory, featureName);
+    const legacyContextPath = getContextPath(featurePath);
+    const decisionsPath = getDecisionsPath(featurePath);
+
+    const legacyDecisions = await this.readDecisionsFromDir(legacyContextPath);
+    if (legacyDecisions.length === 0) {
+      return { migrated: 0 };
+    }
+
+    await ensureDir(decisionsPath);
+
+    let migrated = 0;
+    for (const decision of legacyDecisions) {
+      const sourcePath = path.join(legacyContextPath, decision.filename);
+      const destPath = path.join(decisionsPath, decision.filename);
+
+      const destExists = await fileExists(destPath);
+      if (!destExists) {
+        await fs.rename(sourcePath, destPath);
+        migrated++;
+      }
+    }
+
+    return { migrated };
   }
 }
