@@ -14,7 +14,7 @@ Plan-first development: Write plan → User reviews → Approve → Execute task
 
 | Domain | Tools |
 |--------|-------|
-| Feature | hive_feature_create, hive_feature_list, hive_feature_switch, hive_feature_complete, hive_status |
+| Feature | hive_feature_create, hive_feature_list, hive_feature_switch, hive_feature_complete |
 | Plan | hive_plan_write, hive_plan_read, hive_plan_approve |
 | Task | hive_tasks_sync, hive_task_create, hive_task_update |
 | Exec | hive_exec_start, hive_exec_complete, hive_exec_abort |
@@ -145,18 +145,6 @@ const plugin: Plugin = async (ctx) => {
           if (!feature) return "Error: No active feature";
           featureService.complete(feature);
           return `Feature "${feature}" marked as completed`;
-        },
-      }),
-
-      hive_status: tool({
-        description: 'Get overview of active feature',
-        args: { name: tool.schema.string().optional().describe('Feature name (defaults to active)') },
-        async execute({ name }) {
-          const feature = name || featureService.getActive();
-          if (!feature) return "Error: No active feature";
-          const info = featureService.getInfo(feature);
-          if (!info) return `Error: Feature "${feature}" not found`;
-          return JSON.stringify(info, null, 2);
         },
       }),
 
