@@ -3,7 +3,7 @@ import * as fs from "fs";
 import { TaskService } from "./taskService";
 import { FeatureService } from "./featureService";
 import { PlanService } from "./planService";
-import { getTaskPath, getTaskStatusPath, getTaskReportPath } from "../utils/paths";
+import { getTaskPath, getTaskStatusPath, getTaskReportPath, getSubtasksPath, getSubtaskPath, getSubtaskStatusPath, getSubtaskSpecPath, getSubtaskReportPath } from "../utils/paths";
 
 const TEST_ROOT = "/tmp/hive-test-task";
 
@@ -203,6 +203,182 @@ Description
 
       const reportPath = getTaskReportPath(TEST_ROOT, "test-feature", folder);
       expect(fs.readFileSync(reportPath, "utf-8")).toBe(report);
+    });
+  });
+
+  describe("subtasks", () => {
+    let taskFolder: string;
+
+    beforeEach(() => {
+      taskFolder = taskService.create("test-feature", "parent-task");
+    });
+
+    describe("createSubtask", () => {
+      it("creates subtask folder with status.json and spec.md", () => {
+        const subtask = taskService.createSubtask("test-feature", taskFolder, "Write tests", "test");
+
+        expect(subtask.id).toBe("1.1");
+        expect(subtask.name).toBe("Write tests");
+        expect(subtask.folder).toBe("1-write-tests");
+        expect(subtask.status).toBe("pending");
+        expect(subtask.type).toBe("test");
+
+        const subtaskPath = getSubtaskPath(TEST_ROOT, "test-feature", taskFolder, subtask.folder);
+        expect(fs.existsSync(subtaskPath)).toBe(true);
+
+        const statusPath = getSubtaskStatusPath(TEST_ROOT, "test-feature", taskFolder, subtask.folder);
+        expect(fs.existsSync(statusPath)).toBe(true);
+
+        const specPath = getSubtaskSpecPath(TEST_ROOT, "test-feature", taskFolder, subtask.folder);
+        expect(fs.existsSync(specPath)).toBe(true);
+        expect(fs.readFileSync(specPath, "utf-8")).toContain("Write tests");
+      });
+
+      it("auto-increments subtask order", () => {
+        const first = taskService.createSubtask("test-feature", taskFolder, "First", "test");
+        const second = taskService.createSubtask("test-feature", taskFolder, "Second", "implement");
+        const third = taskService.createSubtask("test-feature", taskFolder, "Third", "verify");
+
+        expect(first.id).toBe("1.1");
+        expect(second.id).toBe("1.2");
+        expect(third.id).toBe("1.3");
+      });
+    });
+
+    describe("listSubtasks", () => {
+      it("returns empty array when no subtasks", () => {
+        expect(taskService.listSubtasks("test-feature", taskFolder)).toEqual([]);
+      });
+
+      it("returns all subtasks sorted by order", () => {
+        taskService.createSubtask("test-feature", taskFolder, "Third", "verify");
+        taskService.createSubtask("test-feature", taskFolder, "First", "test");
+
+        const subtasks = taskService.listSubtasks("test-feature", taskFolder);
+
+        expect(subtasks.length).toBe(2);
+        expect(subtasks[0].folder).toBe("1-third");
+        expect(subtasks[1].folder).toBe("2-first");
+      });
+    });
+
+    describe("updateSubtask", () => {
+      it("updates subtask status", () => {
+        const subtask = taskService.createSubtask("test-feature", taskFolder, "Test", "test");
+
+        const updated = taskService.updateSubtask("test-feature", taskFolder, subtask.id, "in_progress");
+
+        expect(updated.status).toBe("in_progress");
+      });
+
+      it("sets completedAt when status becomes done", () => {
+        const subtask = taskService.createSubtask("test-feature", taskFolder, "Test", "test");
+
+        const updated = taskService.updateSubtask("test-feature", taskFolder, subtask.id, "done");
+
+        expect(updated.completedAt).toBeDefined();
+      });
+
+      it("throws for non-existing subtask", () => {
+        expect(() => taskService.updateSubtask("test-feature", taskFolder, "1.99", "done")).toThrow();
+      });
+    });
+
+    describe("deleteSubtask", () => {
+      it("removes subtask folder", () => {
+        const subtask = taskService.createSubtask("test-feature", taskFolder, "ToDelete", "test");
+        const subtaskPath = getSubtaskPath(TEST_ROOT, "test-feature", taskFolder, subtask.folder);
+
+        expect(fs.existsSync(subtaskPath)).toBe(true);
+
+        taskService.deleteSubtask("test-feature", taskFolder, subtask.id);
+
+        expect(fs.existsSync(subtaskPath)).toBe(false);
+      });
+
+      it("throws for non-existing subtask", () => {
+        expect(() => taskService.deleteSubtask("test-feature", taskFolder, "1.99")).toThrow();
+      });
+    });
+
+    describe("getSubtask", () => {
+      it("returns subtask info", () => {
+        const created = taskService.createSubtask("test-feature", taskFolder, "MySubtask", "implement");
+
+        const subtask = taskService.getSubtask("test-feature", taskFolder, created.id);
+
+        expect(subtask).not.toBeNull();
+        expect(subtask!.id).toBe("1.1");
+        expect(subtask!.name).toBe("mysubtask");
+        expect(subtask!.folder).toBe("1-mysubtask");
+        expect(subtask!.type).toBe("implement");
+      });
+
+      it("returns null for non-existing subtask", () => {
+        expect(taskService.getSubtask("test-feature", taskFolder, "1.99")).toBeNull();
+      });
+    });
+
+    describe("writeSubtaskSpec", () => {
+      it("writes spec.md content", () => {
+        const subtask = taskService.createSubtask("test-feature", taskFolder, "Test", "test");
+        const content = "# Custom Spec\n\nDetailed instructions here.";
+
+        const specPath = taskService.writeSubtaskSpec("test-feature", taskFolder, subtask.id, content);
+
+        expect(fs.readFileSync(specPath, "utf-8")).toBe(content);
+      });
+
+      it("throws for non-existing subtask", () => {
+        expect(() => taskService.writeSubtaskSpec("test-feature", taskFolder, "1.99", "content")).toThrow();
+      });
+    });
+
+    describe("writeSubtaskReport", () => {
+      it("writes report.md content", () => {
+        const subtask = taskService.createSubtask("test-feature", taskFolder, "Test", "test");
+        const content = "# Report\n\nCompleted successfully.";
+
+        const reportPath = taskService.writeSubtaskReport("test-feature", taskFolder, subtask.id, content);
+
+        expect(fs.readFileSync(reportPath, "utf-8")).toBe(content);
+      });
+
+      it("throws for non-existing subtask", () => {
+        expect(() => taskService.writeSubtaskReport("test-feature", taskFolder, "1.99", "content")).toThrow();
+      });
+    });
+
+    describe("readSubtaskSpec", () => {
+      it("reads spec.md content", () => {
+        const subtask = taskService.createSubtask("test-feature", taskFolder, "Test", "test");
+        const content = "Custom spec content";
+        taskService.writeSubtaskSpec("test-feature", taskFolder, subtask.id, content);
+
+        const spec = taskService.readSubtaskSpec("test-feature", taskFolder, subtask.id);
+
+        expect(spec).toBe(content);
+      });
+
+      it("returns null for non-existing subtask", () => {
+        expect(taskService.readSubtaskSpec("test-feature", taskFolder, "1.99")).toBeNull();
+      });
+    });
+
+    describe("readSubtaskReport", () => {
+      it("reads report.md content", () => {
+        const subtask = taskService.createSubtask("test-feature", taskFolder, "Test", "test");
+        const content = "Report content";
+        taskService.writeSubtaskReport("test-feature", taskFolder, subtask.id, content);
+
+        const report = taskService.readSubtaskReport("test-feature", taskFolder, subtask.id);
+
+        expect(report).toBe(content);
+      });
+
+      it("returns null for non-existing subtask", () => {
+        expect(taskService.readSubtaskReport("test-feature", taskFolder, "1.99")).toBeNull();
+      });
     });
   });
 });

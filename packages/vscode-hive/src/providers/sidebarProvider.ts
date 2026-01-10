@@ -13,6 +13,17 @@ interface TaskStatus {
   status: 'pending' | 'in_progress' | 'done' | 'cancelled'
   origin: 'plan' | 'manual'
   summary?: string
+  subtasks?: Subtask[]
+}
+
+interface Subtask {
+  id: string
+  name: string
+  folder: string
+  status: 'pending' | 'in_progress' | 'done' | 'cancelled'
+  type?: 'test' | 'implement' | 'review' | 'verify' | 'research' | 'debug' | 'custom'
+  createdAt?: string
+  completedAt?: string
 }
 
 interface SessionInfo {
@@ -27,7 +38,7 @@ interface SessionsJson {
   sessions: SessionInfo[]
 }
 
-type SidebarItem = StatusGroupItem | FeatureItem | PlanItem | ContextFolderItem | ContextFileItem | TasksGroupItem | TaskItem | TaskFileItem | SessionsGroupItem | SessionItem
+type SidebarItem = StatusGroupItem | FeatureItem | PlanItem | ContextFolderItem | ContextFileItem | TasksGroupItem | TaskItem | TaskFileItem | SubtaskItem | SessionsGroupItem | SessionItem
 
 const STATUS_ICONS: Record<string, string> = {
   pending: 'circle-outline',
@@ -69,7 +80,7 @@ class FeatureItem extends vscode.TreeItem {
     public readonly taskStats: { total: number; done: number },
     public readonly isActive: boolean
   ) {
-    super(name, vscode.TreeItemCollapsibleState.Expanded)
+    super(name, vscode.TreeItemCollapsibleState.Collapsed)
     
     const statusLabel = feature.status.charAt(0).toUpperCase() + feature.status.slice(1)
     this.description = isActive 
@@ -141,7 +152,7 @@ class TasksGroupItem extends vscode.TreeItem {
     public readonly featureName: string,
     public readonly tasks: Array<{ folder: string; status: TaskStatus }>
   ) {
-    super('Tasks', tasks.length > 0 ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None)
+    super('Tasks', tasks.length > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None)
     
     const done = tasks.filter(t => t.status.status === 'done').length
     this.description = `${done}/${tasks.length}`
@@ -156,13 +167,17 @@ class TaskItem extends vscode.TreeItem {
     public readonly folder: string,
     public readonly status: TaskStatus,
     public readonly specPath: string | null,
-    public readonly reportPath: string | null
+    public readonly reportPath: string | null,
+    public readonly subtaskCount: number = 0,
+    public readonly subtasksDone: number = 0
   ) {
     const name = folder.replace(/^\d+-/, '')
     const hasFiles = specPath !== null || reportPath !== null
-    super(name, hasFiles ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None)
-    
-    this.description = status.summary || ''
+    const hasSubtasks = subtaskCount > 0
+    const hasChildren = hasFiles || hasSubtasks
+    super(name, hasChildren ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None)
+    const subtaskInfo = subtaskCount > 0 ? ` (${subtasksDone}/${subtaskCount})` : ''
+    this.description = (status.summary || '') + subtaskInfo
     this.contextValue = `task-${status.status}${status.origin === 'manual' ? '-manual' : ''}`
     
     const iconName = STATUS_ICONS[status.status] || 'circle-outline'
@@ -173,7 +188,10 @@ class TaskItem extends vscode.TreeItem {
     this.tooltip.appendMarkdown(`Status: ${status.status}\n\n`)
     this.tooltip.appendMarkdown(`Origin: ${status.origin}\n\n`)
     if (status.summary) {
-      this.tooltip.appendMarkdown(`Summary: ${status.summary}`)
+      this.tooltip.appendMarkdown(`Summary: ${status.summary}\n\n`)
+    }
+    if (subtaskCount > 0) {
+      this.tooltip.appendMarkdown(`Subtasks: ${subtasksDone}/${subtaskCount} done`)
     }
   }
 }
@@ -192,6 +210,53 @@ class TaskFileItem extends vscode.TreeItem {
       title: 'Open File',
       arguments: [vscode.Uri.file(filePath)]
     }
+  }
+}
+
+const SUBTASK_TYPE_ICONS: Record<string, string> = {
+  test: 'beaker',
+  implement: 'code',
+  review: 'eye',
+  verify: 'check-all',
+  research: 'search',
+  debug: 'debug',
+  custom: 'circle-outline',
+}
+
+class SubtaskItem extends vscode.TreeItem {
+  constructor(
+    public readonly featureName: string,
+    public readonly taskFolder: string,
+    public readonly subtask: Subtask,
+    public readonly subtaskPath: string
+  ) {
+    super(subtask.name, vscode.TreeItemCollapsibleState.None)
+    
+    const typeTag = subtask.type ? ` [${subtask.type}]` : ''
+    const targetFile = subtask.status === 'done' ? 'report' : 'spec'
+    this.description = `${subtask.id}${typeTag} → ${targetFile}`
+    this.contextValue = `subtask-${subtask.status}`
+    
+    const statusIcon = STATUS_ICONS[subtask.status] || 'circle-outline'
+    this.iconPath = new vscode.ThemeIcon(statusIcon)
+    
+    const targetFilePath = path.join(subtaskPath, subtask.status === 'done' ? 'report.md' : 'spec.md')
+    if (fs.existsSync(targetFilePath)) {
+      this.command = {
+        command: 'vscode.open',
+        title: 'Open File',
+        arguments: [vscode.Uri.file(targetFilePath)]
+      }
+    }
+    
+    this.tooltip = new vscode.MarkdownString()
+    this.tooltip.appendMarkdown(`**${subtask.name}**\n\n`)
+    this.tooltip.appendMarkdown(`ID: ${subtask.id}\n\n`)
+    this.tooltip.appendMarkdown(`Status: ${subtask.status}\n\n`)
+    if (subtask.type) {
+      this.tooltip.appendMarkdown(`Type: ${subtask.type}\n\n`)
+    }
+    this.tooltip.appendMarkdown(`Click to open: ${targetFile}.md`)
   }
 }
 
@@ -389,19 +454,71 @@ export class HiveSidebarProvider implements vscode.TreeDataProvider<SidebarItem>
       const reportPath = path.join(taskDir, 'report.md')
       const hasSpec = fs.existsSync(specPath)
       const hasReport = fs.existsSync(reportPath)
-      return new TaskItem(featureName, t.folder, t.status, hasSpec ? specPath : null, hasReport ? reportPath : null)
+      
+      const subtasks = this.getSubtasksFromFolders(featureName, t.folder)
+      const subtaskCount = subtasks.length
+      const subtasksDone = subtasks.filter(s => s.status === 'done').length
+      
+      return new TaskItem(featureName, t.folder, t.status, hasSpec ? specPath : null, hasReport ? reportPath : null, subtaskCount, subtasksDone)
     })
   }
 
-  private getTaskFiles(taskItem: TaskItem): TaskFileItem[] {
-    const files: TaskFileItem[] = []
+  private getTaskFiles(taskItem: TaskItem): (TaskFileItem | SubtaskItem)[] {
+    const items: (TaskFileItem | SubtaskItem)[] = []
+    
     if (taskItem.specPath) {
-      files.push(new TaskFileItem('spec.md', taskItem.specPath))
+      items.push(new TaskFileItem('spec.md', taskItem.specPath))
     }
     if (taskItem.reportPath) {
-      files.push(new TaskFileItem('report.md', taskItem.reportPath))
+      items.push(new TaskFileItem('report.md', taskItem.reportPath))
     }
-    return files
+    
+    const subtasks = this.getSubtasksFromFolders(taskItem.featureName, taskItem.folder)
+    for (const subtask of subtasks) {
+      const subtaskPath = path.join(
+        this.workspaceRoot, '.hive', 'features', taskItem.featureName,
+        'tasks', taskItem.folder, 'subtasks', subtask.folder
+      )
+      items.push(new SubtaskItem(taskItem.featureName, taskItem.folder, subtask, subtaskPath))
+    }
+    
+    return items
+  }
+
+  private getSubtasksFromFolders(featureName: string, taskFolder: string): Subtask[] {
+    const subtasksPath = path.join(
+      this.workspaceRoot, '.hive', 'features', featureName, 'tasks', taskFolder, 'subtasks'
+    )
+    if (!fs.existsSync(subtasksPath)) return []
+
+    const taskOrder = parseInt(taskFolder.split('-')[0], 10)
+    const folders = fs.readdirSync(subtasksPath, { withFileTypes: true })
+      .filter(d => d.isDirectory())
+      .map(d => d.name)
+      .sort()
+
+    return folders.map(folder => {
+      const statusPath = path.join(subtasksPath, folder, 'status.json')
+      const subtaskOrder = parseInt(folder.split('-')[0], 10)
+      const name = folder.replace(/^\d+-/, '')
+      
+      let status: any = { status: 'pending' }
+      if (fs.existsSync(statusPath)) {
+        try {
+          status = JSON.parse(fs.readFileSync(statusPath, 'utf-8'))
+        } catch {}
+      }
+
+      return {
+        id: `${taskOrder}.${subtaskOrder}`,
+        name,
+        folder,
+        status: status.status || 'pending',
+        type: status.type,
+        createdAt: status.createdAt,
+        completedAt: status.completedAt,
+      }
+    })
   }
 
   private getTaskList(featureName: string): Array<{ folder: string; status: TaskStatus }> {

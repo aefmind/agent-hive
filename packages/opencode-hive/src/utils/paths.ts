@@ -59,6 +59,30 @@ export function getTaskSpecPath(projectRoot: string, featureName: string, taskFo
   return path.join(getTaskPath(projectRoot, featureName, taskFolder), 'spec.md');
 }
 
+// Subtask paths
+const SUBTASKS_DIR = 'subtasks';
+const SPEC_FILE = 'spec.md';
+
+export function getSubtasksPath(projectRoot: string, featureName: string, taskFolder: string): string {
+  return path.join(getTaskPath(projectRoot, featureName, taskFolder), SUBTASKS_DIR);
+}
+
+export function getSubtaskPath(projectRoot: string, featureName: string, taskFolder: string, subtaskFolder: string): string {
+  return path.join(getSubtasksPath(projectRoot, featureName, taskFolder), subtaskFolder);
+}
+
+export function getSubtaskStatusPath(projectRoot: string, featureName: string, taskFolder: string, subtaskFolder: string): string {
+  return path.join(getSubtaskPath(projectRoot, featureName, taskFolder, subtaskFolder), STATUS_FILE);
+}
+
+export function getSubtaskSpecPath(projectRoot: string, featureName: string, taskFolder: string, subtaskFolder: string): string {
+  return path.join(getSubtaskPath(projectRoot, featureName, taskFolder, subtaskFolder), SPEC_FILE);
+}
+
+export function getSubtaskReportPath(projectRoot: string, featureName: string, taskFolder: string, subtaskFolder: string): string {
+  return path.join(getSubtaskPath(projectRoot, featureName, taskFolder, subtaskFolder), REPORT_FILE);
+}
+
 export function ensureDir(dirPath: string): void {
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
