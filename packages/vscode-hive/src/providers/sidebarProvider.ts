@@ -13,6 +13,16 @@ interface TaskStatus {
   status: 'pending' | 'in_progress' | 'done' | 'cancelled'
   origin: 'plan' | 'manual'
   summary?: string
+  subtasks?: Subtask[]
+}
+
+interface Subtask {
+  id: string
+  name: string
+  status: 'pending' | 'in_progress' | 'done' | 'cancelled'
+  type?: 'test' | 'implement' | 'review' | 'verify' | 'research' | 'debug' | 'custom'
+  createdAt?: string
+  completedAt?: string
 }
 
 interface SessionInfo {
@@ -27,7 +37,7 @@ interface SessionsJson {
   sessions: SessionInfo[]
 }
 
-type SidebarItem = StatusGroupItem | FeatureItem | PlanItem | ContextFolderItem | ContextFileItem | TasksGroupItem | TaskItem | TaskFileItem | SessionsGroupItem | SessionItem
+type SidebarItem = StatusGroupItem | FeatureItem | PlanItem | ContextFolderItem | ContextFileItem | TasksGroupItem | TaskItem | TaskFileItem | SubtaskItem | SessionsGroupItem | SessionItem
 
 const STATUS_ICONS: Record<string, string> = {
   pending: 'circle-outline',
@@ -160,9 +170,14 @@ class TaskItem extends vscode.TreeItem {
   ) {
     const name = folder.replace(/^\d+-/, '')
     const hasFiles = specPath !== null || reportPath !== null
-    super(name, hasFiles ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None)
+    const hasSubtasks = (status.subtasks?.length || 0) > 0
+    const hasChildren = hasFiles || hasSubtasks
+    super(name, hasChildren ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None)
     
-    this.description = status.summary || ''
+    const subtaskCount = status.subtasks?.length || 0
+    const subtasksDone = status.subtasks?.filter(s => s.status === 'done').length || 0
+    const subtaskInfo = subtaskCount > 0 ? ` (${subtasksDone}/${subtaskCount})` : ''
+    this.description = (status.summary || '') + subtaskInfo
     this.contextValue = `task-${status.status}${status.origin === 'manual' ? '-manual' : ''}`
     
     const iconName = STATUS_ICONS[status.status] || 'circle-outline'
@@ -173,7 +188,10 @@ class TaskItem extends vscode.TreeItem {
     this.tooltip.appendMarkdown(`Status: ${status.status}\n\n`)
     this.tooltip.appendMarkdown(`Origin: ${status.origin}\n\n`)
     if (status.summary) {
-      this.tooltip.appendMarkdown(`Summary: ${status.summary}`)
+      this.tooltip.appendMarkdown(`Summary: ${status.summary}\n\n`)
+    }
+    if (subtaskCount > 0) {
+      this.tooltip.appendMarkdown(`Subtasks: ${subtasksDone}/${subtaskCount} done`)
     }
   }
 }
@@ -191,6 +209,47 @@ class TaskFileItem extends vscode.TreeItem {
       command: 'vscode.open',
       title: 'Open File',
       arguments: [vscode.Uri.file(filePath)]
+    }
+  }
+}
+
+const SUBTASK_TYPE_ICONS: Record<string, string> = {
+  test: 'beaker',
+  implement: 'code',
+  review: 'eye',
+  verify: 'check-all',
+  research: 'search',
+  debug: 'debug',
+  custom: 'circle-outline',
+}
+
+class SubtaskItem extends vscode.TreeItem {
+  constructor(
+    public readonly featureName: string,
+    public readonly taskFolder: string,
+    public readonly subtask: Subtask
+  ) {
+    super(subtask.name, vscode.TreeItemCollapsibleState.None)
+    
+    const typeTag = subtask.type ? ` [${subtask.type}]` : ''
+    this.description = `${subtask.id}${typeTag}`
+    this.contextValue = `subtask-${subtask.status}`
+    
+    const statusIcon = STATUS_ICONS[subtask.status] || 'circle-outline'
+    this.iconPath = new vscode.ThemeIcon(statusIcon)
+    
+    this.tooltip = new vscode.MarkdownString()
+    this.tooltip.appendMarkdown(`**${subtask.name}**\n\n`)
+    this.tooltip.appendMarkdown(`ID: ${subtask.id}\n\n`)
+    this.tooltip.appendMarkdown(`Status: ${subtask.status}\n\n`)
+    if (subtask.type) {
+      this.tooltip.appendMarkdown(`Type: ${subtask.type}\n\n`)
+    }
+    if (subtask.createdAt) {
+      this.tooltip.appendMarkdown(`Created: ${subtask.createdAt}\n\n`)
+    }
+    if (subtask.completedAt) {
+      this.tooltip.appendMarkdown(`Completed: ${subtask.completedAt}`)
     }
   }
 }
@@ -393,15 +452,22 @@ export class HiveSidebarProvider implements vscode.TreeDataProvider<SidebarItem>
     })
   }
 
-  private getTaskFiles(taskItem: TaskItem): TaskFileItem[] {
-    const files: TaskFileItem[] = []
+  private getTaskFiles(taskItem: TaskItem): (TaskFileItem | SubtaskItem)[] {
+    const items: (TaskFileItem | SubtaskItem)[] = []
+    
     if (taskItem.specPath) {
-      files.push(new TaskFileItem('spec.md', taskItem.specPath))
+      items.push(new TaskFileItem('spec.md', taskItem.specPath))
     }
     if (taskItem.reportPath) {
-      files.push(new TaskFileItem('report.md', taskItem.reportPath))
+      items.push(new TaskFileItem('report.md', taskItem.reportPath))
     }
-    return files
+    
+    const subtasks = taskItem.status.subtasks || []
+    for (const subtask of subtasks) {
+      items.push(new SubtaskItem(taskItem.featureName, taskItem.folder, subtask))
+    }
+    
+    return items
   }
 
   private getTaskList(featureName: string): Array<{ folder: string; status: TaskStatus }> {

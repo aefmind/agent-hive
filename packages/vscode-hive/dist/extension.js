@@ -201,13 +201,18 @@ var TaskItem = class extends vscode3.TreeItem {
   constructor(featureName, folder, status, specPath, reportPath) {
     const name = folder.replace(/^\d+-/, "");
     const hasFiles = specPath !== null || reportPath !== null;
-    super(name, hasFiles ? vscode3.TreeItemCollapsibleState.Collapsed : vscode3.TreeItemCollapsibleState.None);
+    const hasSubtasks = (status.subtasks?.length || 0) > 0;
+    const hasChildren = hasFiles || hasSubtasks;
+    super(name, hasChildren ? vscode3.TreeItemCollapsibleState.Collapsed : vscode3.TreeItemCollapsibleState.None);
     this.featureName = featureName;
     this.folder = folder;
     this.status = status;
     this.specPath = specPath;
     this.reportPath = reportPath;
-    this.description = status.summary || "";
+    const subtaskCount = status.subtasks?.length || 0;
+    const subtasksDone = status.subtasks?.filter((s) => s.status === "done").length || 0;
+    const subtaskInfo = subtaskCount > 0 ? ` (${subtasksDone}/${subtaskCount})` : "";
+    this.description = (status.summary || "") + subtaskInfo;
     this.contextValue = `task-${status.status}${status.origin === "manual" ? "-manual" : ""}`;
     const iconName = STATUS_ICONS[status.status] || "circle-outline";
     this.iconPath = new vscode3.ThemeIcon(iconName);
@@ -222,7 +227,12 @@ var TaskItem = class extends vscode3.TreeItem {
 
 `);
     if (status.summary) {
-      this.tooltip.appendMarkdown(`Summary: ${status.summary}`);
+      this.tooltip.appendMarkdown(`Summary: ${status.summary}
+
+`);
+    }
+    if (subtaskCount > 0) {
+      this.tooltip.appendMarkdown(`Subtasks: ${subtasksDone}/${subtaskCount} done`);
     }
   }
 };
@@ -238,6 +248,42 @@ var TaskFileItem = class extends vscode3.TreeItem {
       title: "Open File",
       arguments: [vscode3.Uri.file(filePath)]
     };
+  }
+};
+var SubtaskItem = class extends vscode3.TreeItem {
+  constructor(featureName, taskFolder, subtask) {
+    super(subtask.name, vscode3.TreeItemCollapsibleState.None);
+    this.featureName = featureName;
+    this.taskFolder = taskFolder;
+    this.subtask = subtask;
+    const typeTag = subtask.type ? ` [${subtask.type}]` : "";
+    this.description = `${subtask.id}${typeTag}`;
+    this.contextValue = `subtask-${subtask.status}`;
+    const statusIcon = STATUS_ICONS[subtask.status] || "circle-outline";
+    this.iconPath = new vscode3.ThemeIcon(statusIcon);
+    this.tooltip = new vscode3.MarkdownString();
+    this.tooltip.appendMarkdown(`**${subtask.name}**
+
+`);
+    this.tooltip.appendMarkdown(`ID: ${subtask.id}
+
+`);
+    this.tooltip.appendMarkdown(`Status: ${subtask.status}
+
+`);
+    if (subtask.type) {
+      this.tooltip.appendMarkdown(`Type: ${subtask.type}
+
+`);
+    }
+    if (subtask.createdAt) {
+      this.tooltip.appendMarkdown(`Created: ${subtask.createdAt}
+
+`);
+    }
+    if (subtask.completedAt) {
+      this.tooltip.appendMarkdown(`Completed: ${subtask.completedAt}`);
+    }
   }
 };
 var SessionsGroupItem = class extends vscode3.TreeItem {
@@ -395,14 +441,18 @@ var HiveSidebarProvider = class {
     });
   }
   getTaskFiles(taskItem) {
-    const files = [];
+    const items = [];
     if (taskItem.specPath) {
-      files.push(new TaskFileItem("spec.md", taskItem.specPath));
+      items.push(new TaskFileItem("spec.md", taskItem.specPath));
     }
     if (taskItem.reportPath) {
-      files.push(new TaskFileItem("report.md", taskItem.reportPath));
+      items.push(new TaskFileItem("report.md", taskItem.reportPath));
     }
-    return files;
+    const subtasks = taskItem.status.subtasks || [];
+    for (const subtask of subtasks) {
+      items.push(new SubtaskItem(taskItem.featureName, taskItem.folder, subtask));
+    }
+    return items;
   }
   getTaskList(featureName) {
     const tasksPath = path.join(this.workspaceRoot, ".hive", "features", featureName, "tasks");
