@@ -3,7 +3,7 @@ import * as path from 'path'
 
 /**
  * Launcher for Hive features - works with GitHub Copilot Chat
- * Replaces the OpenCode-specific launcher
+ * Replaces OpenCode-specific launcher
  */
 export class Launcher {
   constructor(private workspaceRoot: string) {}
@@ -12,15 +12,21 @@ export class Launcher {
    * Open a feature's plan in VS Code and show instructions
    */
   async openFeature(feature: string): Promise<void> {
+    if (!feature || !this.workspaceRoot) {
+      vscode.window.showWarningMessage('Hive: Invalid feature name or workspace root')
+      return
+    }
+
     const planPath = path.join(this.workspaceRoot, '.hive', 'features', feature, 'plan.md')
     try {
-      const doc = await vscode.workspace.openTextDocument(planPath)
-      await vscode.window.showTextDocument(doc)
+      const uri = vscode.Uri.file(planPath)
+      await vscode.workspace.openTextDocument(uri)
+      await vscode.window.showTextDocument(uri)
       vscode.window.showInformationMessage(
         `Hive: Opened ${feature} plan. Use @Hive in Copilot Chat to continue.`
       )
-    } catch {
-      vscode.window.showWarningMessage(`Hive: No plan found for feature "${feature}"`)
+    } catch (error: any) {
+      vscode.window.showWarningMessage(`Hive: No plan found for feature "${feature}" - ${error}`)
     }
   }
 
@@ -28,13 +34,18 @@ export class Launcher {
    * Open a task's worktree folder in a new VS Code window
    */
   async openTask(feature: string, task: string): Promise<void> {
+    if (!feature || !task || !this.workspaceRoot) {
+      vscode.window.showWarningMessage('Hive: Invalid feature name, task name, or workspace root')
+      return
+    }
+
     const worktreePath = path.join(this.workspaceRoot, '.hive', '.worktrees', feature, task)
     const uri = vscode.Uri.file(worktreePath)
-    
+
     try {
       await vscode.commands.executeCommand('vscode.openFolder', uri, { forceNewWindow: true })
-    } catch {
-      vscode.window.showErrorMessage(`Hive: Worktree not found for ${feature}/${task}`)
+    } catch (error: any) {
+      vscode.window.showErrorMessage(`Hive: Worktree not found for ${feature}/${task} - ${error}`)
     }
   }
 
@@ -42,11 +53,68 @@ export class Launcher {
    * Open a file in VS Code
    */
   async openFile(filePath: string): Promise<void> {
+    if (!filePath || !this.workspaceRoot) {
+      vscode.window.showWarningMessage('Hive: Invalid file path or workspace root')
+      return
+    }
+
     try {
-      const doc = await vscode.workspace.openTextDocument(filePath)
+      const uri = vscode.Uri.file(filePath)
+      await vscode.workspace.openTextDocument(uri)
+      await vscode.window.showTextDocument(uri)
+    } catch (error: any) {
+      vscode.window.showErrorMessage(`Hive: Could not open file "${filePath}" - ${error}`)
+    }
+  }
+}
+
+    const planPath = path.join(this.workspaceRoot, '.hive', 'features', feature, 'plan.md')
+    try {
+      const uri = vscode.Uri.file(planPath)
+      const doc = await vscode.workspace.openTextDocument(uri)
       await vscode.window.showTextDocument(doc)
-    } catch {
-      vscode.window.showErrorMessage(`Hive: Could not open file "${filePath}"`)
+      vscode.window.showInformationMessage(
+        `Hive: Opened ${feature} plan. Use @Hive in Copilot Chat to continue.`
+      )
+    } catch (error) {
+      vscode.window.showWarningMessage(`Hive: No plan found for feature "${feature}" - ${error}`)
+    }
+  }
+
+  /**
+   * Open a task's worktree folder in a new VS Code window
+   */
+  async openTask(feature: string, task: string): Promise<void> {
+    if (!feature || !task || !this.workspaceRoot) {
+      vscode.window.showWarningMessage('Hive: Invalid feature name, task name, or workspace root')
+      return
+    }
+
+    const worktreePath = path.join(this.workspaceRoot, '.hive', '.worktrees', feature, task)
+    const uri = vscode.Uri.file(worktreePath)
+
+    try {
+      await vscode.commands.executeCommand('vscode.openFolder', uri, { forceNewWindow: true })
+    } catch (error) {
+      vscode.window.showErrorMessage(`Hive: Worktree not found for ${feature}/${task} - ${error}`)
+    }
+  }
+
+  /**
+   * Open a file in VS Code
+   */
+  async openFile(filePath: string): Promise<void> {
+    if (!filePath || !this.workspaceRoot) {
+      vscode.window.showWarningMessage('Hive: Invalid file path or workspace root')
+      return
+    }
+
+    try {
+      const uri = vscode.Uri.file(filePath)
+      const doc = await vscode.workspace.openTextDocument(uri)
+      await vscode.window.showTextDocument(doc)
+    } catch (error) {
+      vscode.window.showErrorMessage(`Hive: Could not open file "${filePath}" - ${error}`)
     }
   }
 }
