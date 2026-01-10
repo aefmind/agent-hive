@@ -79,11 +79,13 @@ jobs:
         working-directory: packages/opencode-hive
         run: bun run build
 
+      - name: Configure npm registry
+        working-directory: packages/opencode-hive
+        run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_KEY }}" > .npmrc
+
       - name: Publish to npm
         run: bun publish --access public --provenance
         working-directory: packages/opencode-hive
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_KEY }}
 
   publish-vscode:
     needs: build
