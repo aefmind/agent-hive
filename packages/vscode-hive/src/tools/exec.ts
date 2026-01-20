@@ -29,7 +29,11 @@ export function getExecTools(workspaceRoot: string): ToolRegistration[] {
           success: true,
           worktreePath: worktree.path,
           branch: worktree.branch,
-          message: `Worktree created. Work in ${worktree.path}. When done, use hive_exec_complete. Reminder: do all work inside this worktree and ensure any subagents do the same.`,
+          message: `Worktree created. Work in ${worktree.path}. When done, use hive_exec_complete.`,
+          hints: [
+            'Do all work inside this worktree. Ensure any subagents do the same.',
+            'Context files are in .hive/features/<feature>/context/ if you need background.'
+          ]
         });
       },
     },
@@ -66,6 +70,9 @@ export function getExecTools(workspaceRoot: string): ToolRegistration[] {
           message: result.committed 
             ? `Changes committed. Use hive_merge to integrate into main branch.`
             : result.message || 'No changes to commit',
+          hints: result.committed ? [
+            'Proceed to next task or use hive_merge to integrate changes.'
+          ] : []
         });
       },
     },

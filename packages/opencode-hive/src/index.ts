@@ -44,15 +44,9 @@ function parseFrontmatter(content: string): { meta: Record<string, string>; body
 function getSkillsDir(): string {
   // In ESM, use import.meta.url to find the skills directory relative to this file
   // At runtime, we're in dist/index.js, so skills/ is ../skills/ from dist/
-  try {
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    // From dist/, go up to package root, then into skills/
-    return path.join(__dirname, '..', 'skills');
-  } catch {
-    // Fallback for CJS or test environments
-    return path.join(__dirname, '..', 'skills');
-  }
+  const filename = fileURLToPath(import.meta.url);
+  const dirname = path.dirname(filename);
+  return path.join(dirname, '..', 'skills');
 }
 
 function discoverHiveSkills(): HiveSkill[] {
@@ -157,36 +151,37 @@ function createHiveSkillTool(): ToolDefinition {
 }
 
 // ============================================================================
-
 import {
   WorktreeService,
   FeatureService,
   PlanService,
   TaskService,
-  SubtaskService,
   ContextService,
-  SessionService,
   detectContext,
   listFeatures,
 } from "hive-core";
+import { selectAgent, type OmoSlimAgent } from "./utils/agent-selector";
+import { buildWorkerPrompt, type ContextFile, type CompletedTask } from "./utils/worker-prompt";
+import { buildHiveAgentPrompt, type FeatureContext } from "./agents/hive";
 
 const HIVE_SYSTEM_PROMPT = `
 ## Hive - Feature Development System
 
 Plan-first development: Write plan → User reviews → Approve → Execute tasks
 
-### Tools (24 total)
+### Tools (19 total)
 
 | Domain | Tools |
 |--------|-------|
 | Feature | hive_feature_create, hive_feature_list, hive_feature_complete |
 | Plan | hive_plan_write, hive_plan_read, hive_plan_approve |
 | Task | hive_tasks_sync, hive_task_create, hive_task_update |
-| Subtask | hive_subtask_create, hive_subtask_update, hive_subtask_list, hive_subtask_spec_write, hive_subtask_report_write |
 | Exec | hive_exec_start, hive_exec_complete, hive_exec_abort |
+| Worker | hive_worker_status |
 | Merge | hive_merge, hive_worktree_list |
-| Context | hive_context_write, hive_context_read, hive_context_list |
-| Session | hive_session_open, hive_session_list |
+| Context | hive_context_write |
+| Status | hive_status |
+| Skill | hive_skill |
 
 ### Workflow
 
@@ -201,37 +196,31 @@ Plan-first development: Write plan → User reviews → Approve → Execute task
 **Important:** \`hive_exec_complete\` commits changes to task branch but does NOT merge.
 Use \`hive_merge\` to explicitly integrate changes. Worktrees persist until manually removed.
 
-### Subtasks & TDD
+### Delegated Execution (OMO-Slim Integration)
 
-For complex tasks, break work into subtasks:
+When OMO-Slim is installed, \`hive_exec_start\` spawns worker agents in tmux panes:
 
-\`\`\`
-hive_subtask_create(task, "Write failing tests", "test")
-hive_subtask_create(task, "Implement until green", "implement")
-hive_subtask_create(task, "Run test suite", "verify")
-\`\`\`
+1. \`hive_exec_start(task)\` → Creates worktree + spawns worker via \`background_task\`
+2. Worker appears in tmux pane - watch it work in real-time
+3. Worker completes → calls \`hive_exec_complete(status: "completed")\`
+4. Worker blocked → calls \`hive_exec_complete(status: "blocked", blocker: {...})\`
 
-Subtask types: test, implement, review, verify, research, debug, custom
+**Handling blocked workers:**
+1. Check blockers with \`hive_worker_status()\`
+2. Read the blocker info (reason, options, recommendation)
+3. Ask user via \`question()\` tool
+4. Resume with \`hive_exec_start(task, continueFrom: "blocked", decision: answer)\`
 
-**Test-Driven Development**: For implementation tasks, consider writing tests first.
-Tests define "done" and provide feedback loops that improve quality.
+**Agent auto-selection** based on task content:
+| Pattern | Agent |
+|---------|-------|
+| find, search, explore | explorer |
+| research, docs | librarian |
+| ui, component, react | designer |
+| architect, decision | oracle |
+| (default) | general |
 
-### Plan Format
-
-\`\`\`markdown
-# Feature Name
-
-## Overview
-What we're building and why.
-
-## Tasks
-
-### 1. Task Name
-Description of what to do.
-
-### 2. Another Task
-Description.
-\`\`\`
+Without OMO-Slim: \`hive_exec_start\` falls back to inline mode (work in same session).
 
 ### Planning Phase - Context Management REQUIRED
 
@@ -244,9 +233,14 @@ As you research and plan, CONTINUOUSLY save findings using \`hive_context_write\
 **Update existing context files** when new info emerges - dont create duplicates.
 Workers depend on context for background. Without it, they work blind.
 
-Save context BEFORE writing the plan, and UPDATE it as planning iterates.
-
 \`hive_tasks_sync\` parses \`### N. Task Name\` headers.
+
+### Execution Phase - Stay Aligned
+
+During execution, call \`hive_status\` periodically to:
+- Check current progress and pending work
+- See context files to read
+- Get reminded of next actions
 `;
 
 type ToolContext = {
@@ -262,13 +256,40 @@ const plugin: Plugin = async (ctx) => {
   const featureService = new FeatureService(directory);
   const planService = new PlanService(directory);
   const taskService = new TaskService(directory);
-  const subtaskService = new SubtaskService(directory);
   const contextService = new ContextService(directory);
-  const sessionService = new SessionService(directory);
   const worktreeService = new WorktreeService({
     baseDir: directory,
     hiveDir: path.join(directory, '.hive'),
   });
+
+  // OMO-Slim detection state
+  let omoSlimDetected = false;
+  let detectionDone = false;
+
+  /**
+   * Detect OMO-Slim by checking for background_task tool.
+   * Called lazily on first tool invocation that needs delegation.
+   */
+  const detectOmoSlim = (toolContext: unknown): boolean => {
+    if (detectionDone) return omoSlimDetected;
+    
+    const ctx = toolContext as any;
+    // Check if background_task is available in tool registry
+    // This indicates OMO-Slim is installed
+    if (ctx?.tools?.includes?.('background_task') || 
+        ctx?.background_task || 
+        typeof ctx?.callTool === 'function') {
+      // We'll verify on first actual use
+      omoSlimDetected = true;
+    }
+    detectionDone = true;
+    
+    if (omoSlimDetected) {
+      console.log('[Hive] OMO-Slim detected: delegated execution with tmux panes enabled');
+    }
+    
+    return omoSlimDetected;
+  };
 
   const resolveFeature = (explicit?: string): string | null => {
     if (explicit) return explicit;
@@ -290,6 +311,29 @@ const plugin: Plugin = async (ctx) => {
         featureService.setSession(feature, ctx.sessionID);
       }
     }
+  };
+
+  /**
+   * Check if a feature is blocked by the Beekeeper.
+   * Returns the block message if blocked, null otherwise.
+   * 
+   * File protocol: .hive/features/<name>/BLOCKED
+   * - If file exists, feature is blocked
+   * - File contents = reason for blocking
+   */
+  const checkBlocked = (feature: string): string | null => {
+    const fs = require('fs');
+    const blockedPath = path.join(directory, '.hive', 'features', feature, 'BLOCKED');
+    if (fs.existsSync(blockedPath)) {
+      const reason = fs.readFileSync(blockedPath, 'utf-8').trim();
+      return `⛔ BLOCKED by Beekeeper
+
+${reason || '(No reason provided)'}
+
+The human has blocked this feature. Wait for them to unblock it.
+To unblock: Remove .hive/features/${feature}/BLOCKED`;
+    }
+    return null;
   };
 
   return {
@@ -457,20 +501,38 @@ const plugin: Plugin = async (ctx) => {
       }),
 
       hive_exec_start: tool({
-        description: 'Create worktree and begin work on task',
+        description: 'Create worktree and begin work on task. When OMO-Slim is installed, spawns worker agent in tmux pane.',
         args: { 
           task: tool.schema.string().describe('Task folder name'),
           feature: tool.schema.string().optional().describe('Feature name (defaults to detection or single feature)'),
+          continueFrom: tool.schema.enum(['blocked']).optional().describe('Resume a blocked task'),
+          decision: tool.schema.string().optional().describe('Answer to blocker question when continuing'),
         },
-        async execute({ task, feature: explicitFeature }) {
+        async execute({ task, feature: explicitFeature, continueFrom, decision }, toolContext) {
           const feature = resolveFeature(explicitFeature);
           if (!feature) return "Error: No feature specified. Create a feature or provide feature param.";
 
+          const blocked = checkBlocked(feature);
+          if (blocked) return blocked;
+
           const taskInfo = taskService.get(feature, task);
           if (!taskInfo) return `Error: Task "${task}" not found`;
+          
+          // Allow continuing blocked tasks, but not completed ones
           if (taskInfo.status === 'done') return "Error: Task already completed";
+          if (continueFrom === 'blocked' && taskInfo.status !== 'blocked') {
+            return "Error: Task is not in blocked state. Use without continueFrom.";
+          }
 
-          const worktree = await worktreeService.create(feature, task);
+          // Check if we're continuing from blocked - reuse existing worktree
+          let worktree;
+          if (continueFrom === 'blocked') {
+            worktree = await worktreeService.get(feature, task);
+            if (!worktree) return "Error: No worktree found for blocked task";
+          } else {
+            worktree = await worktreeService.create(feature, task);
+          }
+          
           taskService.update(feature, task, { 
             status: 'in_progress',
             baseCommit: worktree.commit,
@@ -488,7 +550,7 @@ const plugin: Plugin = async (ctx) => {
           specContent += `## Feature: ${feature}\n\n`;
           
           if (planResult) {
-            const taskMatch = planResult.content.match(new RegExp(`###\\s*\\d+\\.\\s*${taskInfo.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?(?=###|$)`, 'i'));
+            const taskMatch = planResult.content.match(new RegExp(`###\\s*\\d+\\.\\s*${taskInfo.name.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}[\\s\\S]*?(?=###|$)`, 'i'));
             if (taskMatch) {
               specContent += `## Plan Section\n\n${taskMatch[0].trim()}\n\n`;
             }
@@ -504,35 +566,138 @@ const plugin: Plugin = async (ctx) => {
 
           taskService.writeSpec(feature, task, specContent);
 
+          // Check for OMO-Slim and delegate if available
+          detectOmoSlim(toolContext);
+          
+          if (omoSlimDetected) {
+            // Prepare context for worker prompt
+            const contextFiles: ContextFile[] = [];
+            const contextDir = path.join(directory, '.hive', 'features', feature, 'context');
+            if (fs.existsSync(contextDir)) {
+              const files = fs.readdirSync(contextDir).filter(f => f.endsWith('.md'));
+              for (const file of files) {
+                const content = fs.readFileSync(path.join(contextDir, file), 'utf-8');
+                contextFiles.push({ name: file, content });
+              }
+            }
+
+            const previousTasks: CompletedTask[] = allTasks
+              .filter(t => t.status === 'done' && t.summary)
+              .map(t => ({ name: t.folder, summary: t.summary! }));
+
+            // Build worker prompt
+            const workerPrompt = buildWorkerPrompt({
+              feature,
+              task,
+              taskOrder: parseInt(taskInfo.folder.match(/^(\d+)/)?.[1] || '0', 10),
+              worktreePath: worktree.path,
+              branch: worktree.branch,
+              plan: planResult?.content || 'No plan available',
+              contextFiles,
+              spec: specContent,
+              previousTasks,
+              continueFrom: continueFrom === 'blocked' ? {
+                status: 'blocked',
+                previousSummary: (taskInfo as any).summary || 'No previous summary',
+                decision: decision || 'No decision provided',
+              } : undefined,
+            });
+
+            // Select appropriate agent based on task content
+            const agent = selectAgent(taskInfo.name, specContent);
+
+            // Call OMO-Slim's background_task
+            try {
+              const ctx = toolContext as any;
+              if (ctx.callTool) {
+                const result = await ctx.callTool('background_task', {
+                  agent,
+                  prompt: workerPrompt,
+                  description: `Hive: ${task}`,
+                  sync: false,
+                });
+
+                // Store worker info in task
+                taskService.update(feature, task, {
+                  status: 'in_progress',
+                  workerId: result?.task_id,
+                  agent,
+                  mode: 'omo-slim',
+                } as any);
+
+                return JSON.stringify({
+                  worktreePath: worktree.path,
+                  branch: worktree.branch,
+                  mode: 'delegated',
+                  agent,
+                  taskId: result?.task_id,
+                  message: `Worker spawned via OMO-Slim (${agent} agent). Watch in tmux pane. Use hive_worker_status to check progress.`,
+                }, null, 2);
+              }
+            } catch (e: any) {
+              // Fall through to inline mode if delegation fails
+              console.log('[Hive] OMO-Slim delegation failed, falling back to inline:', e.message);
+            }
+          }
+
+          // Inline mode (no OMO-Slim or delegation failed)
           return `Worktree created at ${worktree.path}\nBranch: ${worktree.branch}\nBase commit: ${worktree.commit}\nSpec: ${task}/spec.md generated\nReminder: do all work inside this worktree and ensure any subagents do the same.`;
         },
       }),
 
       hive_exec_complete: tool({
-        description: 'Complete task: commit changes to branch, write report (does NOT merge or cleanup)',
+        description: 'Complete task: commit changes to branch, write report. Supports blocked/failed/partial status for worker communication.',
         args: {
           task: tool.schema.string().describe('Task folder name'),
           summary: tool.schema.string().describe('Summary of what was done'),
+          status: tool.schema.enum(['completed', 'blocked', 'failed', 'partial']).optional().default('completed').describe('Task completion status'),
+          blocker: tool.schema.object({
+            reason: tool.schema.string().describe('Why the task is blocked'),
+            options: tool.schema.array(tool.schema.string()).optional().describe('Available options for the user'),
+            recommendation: tool.schema.string().optional().describe('Your recommended choice'),
+            context: tool.schema.string().optional().describe('Additional context for the decision'),
+          }).optional().describe('Blocker info when status is blocked'),
           feature: tool.schema.string().optional().describe('Feature name (defaults to detection or single feature)'),
         },
-        async execute({ task, summary, feature: explicitFeature }) {
+        async execute({ task, summary, status = 'completed', blocker, feature: explicitFeature }) {
           const feature = resolveFeature(explicitFeature);
           if (!feature) return "Error: No feature specified. Create a feature or provide feature param.";
 
           const taskInfo = taskService.get(feature, task);
           if (!taskInfo) return `Error: Task "${task}" not found`;
-          if (taskInfo.status !== 'in_progress') return "Error: Task not in progress";
+          if (taskInfo.status !== 'in_progress' && taskInfo.status !== 'blocked') return "Error: Task not in progress";
 
+          // Handle blocked status - don't commit, just update status
+          if (status === 'blocked') {
+            taskService.update(feature, task, { 
+              status: 'blocked', 
+              summary,
+              blocker: blocker as any,
+            } as any);
+
+            const worktree = await worktreeService.get(feature, task);
+            return JSON.stringify({
+              status: 'blocked',
+              task,
+              summary,
+              blocker,
+              worktreePath: worktree?.path,
+              message: 'Task blocked. Hive Master will ask user and resume with hive_exec_start(continueFrom: "blocked", decision: answer)',
+            }, null, 2);
+          }
+
+          // For failed/partial, still commit what we have
           const commitResult = await worktreeService.commitChanges(feature, task, `hive(${task}): ${summary.slice(0, 50)}`);
           
           const diff = await worktreeService.getDiff(feature, task);
 
+          const statusLabel = status === 'completed' ? 'success' : status;
           const reportLines: string[] = [
             `# Task Report: ${task}`,
             '',
             `**Feature:** ${feature}`,
             `**Completed:** ${new Date().toISOString()}`,
-            `**Status:** success`,
+            `**Status:** ${statusLabel}`,
             `**Commit:** ${commitResult.sha || 'none'}`,
             '',
             '---',
@@ -567,10 +732,12 @@ const plugin: Plugin = async (ctx) => {
           }
 
           taskService.writeReport(feature, task, reportLines.join('\n'));
-          taskService.update(feature, task, { status: 'done', summary });
+          
+          const finalStatus = status === 'completed' ? 'done' : status;
+          taskService.update(feature, task, { status: finalStatus as any, summary });
 
           const worktree = await worktreeService.get(feature, task);
-          return `Task "${task}" completed. Changes committed to branch ${worktree?.branch || 'unknown'}.\nUse hive_merge to integrate changes. Worktree preserved at ${worktree?.path || 'unknown'}.`;
+          return `Task "${task}" ${status}. Changes committed to branch ${worktree?.branch || 'unknown'}.\nUse hive_merge to integrate changes. Worktree preserved at ${worktree?.path || 'unknown'}.`;
         },
       }),
 
@@ -588,6 +755,67 @@ const plugin: Plugin = async (ctx) => {
           taskService.update(feature, task, { status: 'pending' });
 
           return `Task "${task}" aborted. Status reset to pending.`;
+        },
+      }),
+
+      hive_worker_status: tool({
+        description: 'Check status of delegated workers. Shows running workers, blockers, and progress.',
+        args: {
+          task: tool.schema.string().optional().describe('Specific task to check, or omit for all'),
+          feature: tool.schema.string().optional().describe('Feature name (defaults to active)'),
+        },
+        async execute({ task: specificTask, feature: explicitFeature }) {
+          const feature = resolveFeature(explicitFeature);
+          if (!feature) return "Error: No feature specified. Create a feature or provide feature param.";
+
+          const STUCK_THRESHOLD = 10 * 60 * 1000; // 10 minutes
+          const now = Date.now();
+
+          const tasks = taskService.list(feature);
+          const inProgressTasks = tasks.filter(t => 
+            (t.status === 'in_progress' || t.status === 'blocked') &&
+            (!specificTask || t.folder === specificTask)
+          );
+
+          if (inProgressTasks.length === 0) {
+            return specificTask 
+              ? `No active worker for task "${specificTask}"`
+              : "No active workers.";
+          }
+
+          const workers = await Promise.all(inProgressTasks.map(async (t) => {
+            const worktree = await worktreeService.get(feature, t.folder);
+            const taskData = t as any;
+            
+            // Calculate if stuck (if we have startedAt)
+            const startedAt = taskData.startedAt ? new Date(taskData.startedAt).getTime() : now;
+            const maybeStuck = (now - startedAt) > STUCK_THRESHOLD && t.status === 'in_progress';
+
+            return {
+              task: t.folder,
+              name: t.name,
+              status: t.status,
+              agent: taskData.agent || 'inline',
+              mode: taskData.mode || 'inline',
+              workerId: taskData.workerId || null,
+              worktreePath: worktree?.path || null,
+              branch: worktree?.branch || null,
+              maybeStuck,
+              blocker: taskData.blocker || null,
+              summary: t.summary || null,
+            };
+          }));
+
+          return JSON.stringify({
+            feature,
+            omoSlimDetected,
+            workers,
+            hint: workers.some(w => w.status === 'blocked')
+              ? 'Use hive_exec_start(task, continueFrom: "blocked", decision: answer) to resume blocked workers'
+              : workers.some(w => w.maybeStuck)
+              ? 'Some workers may be stuck. Check tmux panes or abort with hive_exec_abort.'
+              : 'Workers in progress. Watch tmux panes for live updates.',
+          }, null, 2);
         },
       }),
 
@@ -657,222 +885,193 @@ const plugin: Plugin = async (ctx) => {
         },
       }),
 
-      hive_context_read: tool({
-        description: 'Read a specific context file or all context for the feature',
-        args: {
-          name: tool.schema.string().optional().describe('Context file name. If omitted, returns all context compiled.'),
-          feature: tool.schema.string().optional().describe('Feature name (defaults to active)'),
-        },
-        async execute({ name, feature: explicitFeature }) {
-          const feature = resolveFeature(explicitFeature);
-          if (!feature) return "Error: No feature specified. Create a feature or provide feature param.";
-
-          if (name) {
-            const content = contextService.read(feature, name);
-            if (!content) return `Error: Context file '${name}' not found`;
-            return content;
-          }
-
-          const compiled = contextService.compile(feature);
-          if (!compiled) return "No context files found";
-          return compiled;
-        },
-      }),
-
-      hive_context_list: tool({
-        description: 'List all context files for the feature',
+      // Status Tool
+      hive_status: tool({
+        description: 'Get comprehensive status of a feature including plan, tasks, and context. Returns JSON with all relevant state for resuming work.',
         args: {
           feature: tool.schema.string().optional().describe('Feature name (defaults to active)'),
         },
         async execute({ feature: explicitFeature }) {
           const feature = resolveFeature(explicitFeature);
-          if (!feature) return "Error: No feature specified. Create a feature or provide feature param.";
-
-          const files = contextService.list(feature);
-          if (files.length === 0) return "No context files";
-
-          return files.map(f => `${f.name} (${f.content.length} chars, updated ${f.updatedAt})`).join('\n');
-        },
-      }),
-
-      // Session Tools
-      hive_session_open: tool({
-        description: 'Open session, return full context for a feature',
-        args: {
-          feature: tool.schema.string().optional().describe('Feature name (defaults to active)'),
-          task: tool.schema.string().optional().describe('Task folder to focus on'),
-        },
-        async execute({ feature: explicitFeature, task }, toolContext) {
-          const feature = resolveFeature(explicitFeature);
-          if (!feature) return "Error: No feature specified. Create a feature or provide feature param.";
+          if (!feature) {
+            return JSON.stringify({
+              error: 'No feature specified and no active feature found',
+              hint: 'Use hive_feature_create to create a new feature',
+            });
+          }
 
           const featureData = featureService.get(feature);
-          if (!featureData) return `Error: Feature '${feature}' not found`;
-
-          // Track session
-          const ctx = toolContext as { sessionID?: string };
-          if (ctx?.sessionID) {
-            sessionService.track(feature, ctx.sessionID, task);
+          if (!featureData) {
+            return JSON.stringify({
+              error: `Feature '${feature}' not found`,
+              availableFeatures: featureService.list(),
+            });
           }
 
-          const planResult = planService.read(feature);
+          const blocked = checkBlocked(feature);
+          if (blocked) return blocked;
+
+          const plan = planService.read(feature);
           const tasks = taskService.list(feature);
-          const contextCompiled = contextService.compile(feature);
-          const sessions = sessionService.list(feature);
+          const contextFiles = contextService.list(feature);
 
-          let output = `## Feature: ${feature} [${featureData.status}]\n\n`;
+          const tasksSummary = tasks.map(t => ({
+            folder: t.folder,
+            name: t.name,
+            status: t.status,
+            origin: t.origin || 'plan',
+          }));
+
+          const contextSummary = contextFiles.map(c => ({
+            name: c.name,
+            chars: c.content.length,
+            updatedAt: c.updatedAt,
+          }));
+
+          const pendingTasks = tasksSummary.filter(t => t.status === 'pending');
+          const inProgressTasks = tasksSummary.filter(t => t.status === 'in_progress');
+          const doneTasks = tasksSummary.filter(t => t.status === 'done');
+
+          const getNextAction = (planStatus: string | null, tasks: Array<{ status: string; folder: string }>): string => {
+            if (!planStatus || planStatus === 'draft') {
+              return 'Write or revise plan with hive_plan_write, then get approval';
+            }
+            if (planStatus === 'review') {
+              return 'Wait for plan approval or revise based on comments';
+            }
+            if (tasks.length === 0) {
+              return 'Generate tasks from plan with hive_tasks_sync';
+            }
+            const inProgress = tasks.find(t => t.status === 'in_progress');
+            if (inProgress) {
+              return `Continue work on task: ${inProgress.folder}`;
+            }
+            const pending = tasks.find(t => t.status === 'pending');
+            if (pending) {
+              return `Start next task with hive_exec_start: ${pending.folder}`;
+            }
+            return 'All tasks complete. Review and merge or complete feature.';
+          };
+
+          const planStatus = featureData.status === 'planning' ? 'draft' : 
+                            featureData.status === 'approved' ? 'approved' : 
+                            featureData.status === 'executing' ? 'locked' : 'none';
+
+          return JSON.stringify({
+            feature: {
+              name: feature,
+              status: featureData.status,
+              ticket: featureData.ticket || null,
+              createdAt: featureData.createdAt,
+            },
+            plan: {
+              exists: !!plan,
+              status: planStatus,
+              approved: planStatus === 'approved' || planStatus === 'locked',
+            },
+            tasks: {
+              total: tasks.length,
+              pending: pendingTasks.length,
+              inProgress: inProgressTasks.length,
+              done: doneTasks.length,
+              list: tasksSummary,
+            },
+            context: {
+              fileCount: contextFiles.length,
+              files: contextSummary,
+            },
+            nextAction: getNextAction(planStatus, tasksSummary),
+          });
+        },
+      }),
+
+      hive_request_review: tool({
+        description: 'Request human review of completed task. BLOCKS until human approves or requests changes. Call after completing work, before merging.',
+        args: {
+          task: tool.schema.string().describe('Task folder name'),
+          summary: tool.schema.string().describe('Summary of what you did for human to review'),
+          feature: tool.schema.string().optional().describe('Feature name (defaults to active)'),
+        },
+        async execute({ task, summary, feature: explicitFeature }) {
+          const feature = resolveFeature(explicitFeature);
+          if (!feature) return "Error: No feature specified.";
+
+          const taskDir = path.join(directory, '.hive', 'features', feature, 'tasks', task);
+          if (!fs.existsSync(taskDir)) {
+            return `Error: Task '${task}' not found in feature '${feature}'`;
+          }
+
+          const reportPath = path.join(taskDir, 'report.md');
+          const existingReport = fs.existsSync(reportPath) 
+            ? fs.readFileSync(reportPath, 'utf-8') 
+            : '# Task Report\n';
           
-          if (planResult) {
-            output += `### Plan\n${planResult.content.substring(0, 500)}...\n\n`;
+          const attemptCount = (existingReport.match(/## Attempt \d+/g) || []).length + 1;
+          const timestamp = new Date().toISOString();
+          
+          const newContent = existingReport + `
+## Attempt ${attemptCount}
+
+**Requested**: ${timestamp}
+
+### Summary
+
+${summary}
+
+`;
+          fs.writeFileSync(reportPath, newContent);
+
+          const pendingPath = path.join(taskDir, 'PENDING_REVIEW');
+          fs.writeFileSync(pendingPath, JSON.stringify({
+            attempt: attemptCount,
+            requestedAt: timestamp,
+            summary: summary.substring(0, 200) + (summary.length > 200 ? '...' : ''),
+          }, null, 2));
+
+          const pollInterval = 2000;
+          const maxWait = 30 * 60 * 1000;
+          const startTime = Date.now();
+
+          while (fs.existsSync(pendingPath)) {
+            if (Date.now() - startTime > maxWait) {
+              return 'Review timed out after 30 minutes. Human did not respond.';
+            }
+            await new Promise(resolve => setTimeout(resolve, pollInterval));
           }
 
-          output += `### Tasks (${tasks.length})\n`;
-          tasks.forEach(t => {
-            output += `- ${t.folder}: ${t.name} [${t.status}]\n`;
-          });
-
-          if (contextCompiled) {
-            output += `\n### Context\n${contextCompiled.substring(0, 500)}...\n`;
+          const resultPath = path.join(taskDir, 'REVIEW_RESULT');
+          if (!fs.existsSync(resultPath)) {
+            return 'Review cancelled (PENDING_REVIEW removed but no REVIEW_RESULT).';
           }
 
-          output += `\n### Sessions (${sessions.length})\n`;
-          sessions.forEach(s => {
-            output += `- ${s.sessionId} (${s.taskFolder || 'no task'})\n`;
-          });
+          const result = fs.readFileSync(resultPath, 'utf-8').trim();
 
-          return output;
-        },
-      }),
+          fs.appendFileSync(reportPath, `### Review Result
 
-      hive_session_list: tool({
-        description: 'List all sessions for the feature',
-        args: {
-          feature: tool.schema.string().optional().describe('Feature name (defaults to active)'),
-        },
-        async execute({ feature: explicitFeature }) {
-          const feature = resolveFeature(explicitFeature);
-          if (!feature) return "Error: No feature specified. Create a feature or provide feature param.";
+${result}
 
-          const sessions = sessionService.list(feature);
-          const master = sessionService.getMaster(feature);
+---
 
-          if (sessions.length === 0) return "No sessions";
+`);
 
-          return sessions.map(s => {
-            const masterMark = s.sessionId === master ? ' (master)' : '';
-            return `${s.sessionId}${masterMark} - ${s.taskFolder || 'no task'} - ${s.lastActiveAt}`;
-          }).join('\n');
-        },
-      }),
+          if (result.toUpperCase() === 'APPROVED') {
+            return `✅ APPROVED
 
-      hive_subtask_create: tool({
-        description: 'Create a subtask within a task. Use for TDD: create test/implement/verify subtasks.',
-        args: {
-          task: tool.schema.string().describe('Task folder name'),
-          name: tool.schema.string().describe('Subtask description'),
-          type: tool.schema.enum(['test', 'implement', 'review', 'verify', 'research', 'debug', 'custom']).optional().describe('Subtask type'),
-          feature: tool.schema.string().optional().describe('Feature name (defaults to active)'),
-        },
-        async execute({ task, name, type, feature: explicitFeature }) {
-          const feature = resolveFeature(explicitFeature);
-          if (!feature) return "Error: No feature specified. Create a feature or provide feature param.";
+Your work has been approved. You may now merge:
 
-          try {
-            const subtask = subtaskService.create(feature, task, name, type as any);
-            return `Subtask created: ${subtask.id} - ${subtask.name} [${subtask.type || 'custom'}]`;
-          } catch (e: any) {
-            return `Error: ${e.message}`;
-          }
-        },
-      }),
+  hive_merge(task="${task}")
 
-      hive_subtask_update: tool({
-        description: 'Update subtask status',
-        args: {
-          task: tool.schema.string().describe('Task folder name'),
-          subtask: tool.schema.string().describe('Subtask ID (e.g., "1.1")'),
-          status: tool.schema.enum(['pending', 'in_progress', 'done', 'cancelled']).describe('New status'),
-          feature: tool.schema.string().optional().describe('Feature name (defaults to active)'),
-        },
-        async execute({ task, subtask, status, feature: explicitFeature }) {
-          const feature = resolveFeature(explicitFeature);
-          if (!feature) return "Error: No feature specified. Create a feature or provide feature param.";
+After merging, proceed to the next task.`;
+          } else {
+            return `🔄 Changes Requested
 
-          try {
-            const updated = subtaskService.update(feature, task, subtask, status as any);
-            return `Subtask ${updated.id} updated: ${updated.status}`;
-          } catch (e: any) {
-            return `Error: ${e.message}`;
+${result}
+
+Make the requested changes, then call hive_request_review again.`;
           }
         },
       }),
 
-      hive_subtask_list: tool({
-        description: 'List all subtasks for a task',
-        args: {
-          task: tool.schema.string().describe('Task folder name'),
-          feature: tool.schema.string().optional().describe('Feature name (defaults to active)'),
-        },
-        async execute({ task, feature: explicitFeature }) {
-          const feature = resolveFeature(explicitFeature);
-          if (!feature) return "Error: No feature specified. Create a feature or provide feature param.";
-
-          try {
-            const subtasks = subtaskService.list(feature, task);
-            if (subtasks.length === 0) return "No subtasks for this task.";
-
-            return subtasks.map(s => {
-              const typeTag = s.type ? ` [${s.type}]` : '';
-              const statusIcon = s.status === 'done' ? '✓' : s.status === 'in_progress' ? '→' : '○';
-              return `${statusIcon} ${s.id}: ${s.name}${typeTag}`;
-            }).join('\n');
-          } catch (e: any) {
-            return `Error: ${e.message}`;
-          }
-        },
-      }),
-
-      hive_subtask_spec_write: tool({
-        description: 'Write spec.md for a subtask (detailed instructions)',
-        args: {
-          task: tool.schema.string().describe('Task folder name'),
-          subtask: tool.schema.string().describe('Subtask ID (e.g., "1.1")'),
-          content: tool.schema.string().describe('Spec content (markdown)'),
-          feature: tool.schema.string().optional().describe('Feature name (defaults to active)'),
-        },
-        async execute({ task, subtask, content, feature: explicitFeature }) {
-          const feature = resolveFeature(explicitFeature);
-          if (!feature) return "Error: No feature specified. Create a feature or provide feature param.";
-
-          try {
-            const specPath = subtaskService.writeSpec(feature, task, subtask, content);
-            return `Subtask spec written: ${specPath}`;
-          } catch (e: any) {
-            return `Error: ${e.message}`;
-          }
-        },
-      }),
-
-      hive_subtask_report_write: tool({
-        description: 'Write report.md for a subtask (what was done)',
-        args: {
-          task: tool.schema.string().describe('Task folder name'),
-          subtask: tool.schema.string().describe('Subtask ID (e.g., "1.1")'),
-          content: tool.schema.string().describe('Report content (markdown)'),
-          feature: tool.schema.string().optional().describe('Feature name (defaults to active)'),
-        },
-        async execute({ task, subtask, content, feature: explicitFeature }) {
-          const feature = resolveFeature(explicitFeature);
-          if (!feature) return "Error: No feature specified. Create a feature or provide feature param.";
-
-          try {
-            const reportPath = subtaskService.writeReport(feature, task, subtask, content);
-            return `Subtask report written: ${reportPath}`;
-          } catch (e: any) {
-            return `Error: ${e.message}`;
-          }
-        },
-      }),
     },
 
     command: {
@@ -884,6 +1083,90 @@ const plugin: Plugin = async (ctx) => {
           return `Create feature "${name}" using hive_feature_create tool.`;
         },
       },
+    },
+
+    // Hive Agent - hybrid planner-orchestrator
+    // Agent config follows OpenCode SDK format: model, prompt, temperature
+    agent: {
+      hive: {
+        model: undefined, // Use default model
+        temperature: 0.7,
+        description: 'Hive Master - plan-first development with structured workflow and worker delegation',
+        // Static base prompt - dynamic context injected via systemPrompt hook
+        prompt: buildHiveAgentPrompt(undefined, false),
+      },
+    },
+
+    // Dynamic context injection - this runs on every message
+    systemPrompt: (existingPrompt: string) => {
+      // Only enhance if using hive agent (check if our prompt is in there)
+      if (!existingPrompt.includes('Hive Master')) {
+        return existingPrompt;
+      }
+
+      // Build feature context if active
+      const featureNames = listFeatures(directory);
+      let featureContext: FeatureContext | undefined;
+      
+      for (const featureName of featureNames) {
+        const feature = featureService.get(featureName);
+        if (feature && ['planning', 'executing'].includes(feature.status)) {
+          const tasks = taskService.list(featureName);
+          const pendingCount = tasks.filter(t => t.status === 'pending').length;
+          const inProgressCount = tasks.filter(t => t.status === 'in_progress').length;
+          const doneCount = tasks.filter(t => t.status === 'done').length;
+          
+          const contextDir = path.join(directory, '.hive', 'features', featureName, 'context');
+          const contextList = fs.existsSync(contextDir)
+            ? fs.readdirSync(contextDir).filter(f => f.endsWith('.md'))
+            : [];
+
+          const planResult = planService.read(featureName);
+          let planStatus: 'none' | 'draft' | 'approved' = 'none';
+          if (planResult) {
+            planStatus = planResult.status === 'approved' || planResult.status === 'executing' 
+              ? 'approved' 
+              : 'draft';
+          }
+
+          featureContext = {
+            name: featureName,
+            planStatus,
+            tasksSummary: `${doneCount} done, ${inProgressCount} in progress, ${pendingCount} pending`,
+            contextList,
+          };
+          break;
+        }
+      }
+
+      // If we have feature context or OMO-Slim, rebuild with dynamic content
+      if (featureContext || omoSlimDetected) {
+        return buildHiveAgentPrompt(featureContext, omoSlimDetected);
+      }
+
+      return existingPrompt;
+    },
+
+    // Config hook - merge agents into opencodeConfig.agent (like OMO-Slim does)
+    config: async (opencodeConfig: Record<string, unknown>) => {
+      // Define hive agent config
+      const hiveAgentConfig = {
+        model: undefined,
+        temperature: 0.7,
+        description: 'Hive Master - plan-first development with structured workflow and worker delegation',
+        prompt: buildHiveAgentPrompt(undefined, false),
+      };
+
+      // Merge hive agent into opencodeConfig.agent
+      const configAgent = opencodeConfig.agent as Record<string, unknown> | undefined;
+      if (!configAgent) {
+        opencodeConfig.agent = { hive: hiveAgentConfig };
+      } else {
+        (configAgent as Record<string, unknown>).hive = hiveAgentConfig;
+      }
+
+      // Note: Don't override default_agent if OMO-Slim is also installed
+      // Let user choose via @hive or config
     },
   };
 };

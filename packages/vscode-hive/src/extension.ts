@@ -9,11 +9,12 @@ import {
   getFeatureTools,
   getPlanTools,
   getTaskTools,
-  getSubtaskTools,
   getExecTools,
   getMergeTools,
-  getContextTools
+  getContextTools,
+  getStatusTools
 } from './tools'
+import { initNest } from './commands/initNest'
 
 function findHiveRoot(startPath: string): string | null {
   let current = startPath
@@ -60,19 +61,21 @@ class HiveExtension {
 
     vscode.window.registerTreeDataProvider('hive.features', this.sidebarProvider)
     this.commentController.registerCommands(this.context)
+    vscode.commands.executeCommand('setContext', 'hive.hasHiveRoot', true)
 
     registerAllTools(this.context, [
       ...getFeatureTools(workspaceRoot),
       ...getPlanTools(workspaceRoot),
       ...getTaskTools(workspaceRoot),
-      ...getSubtaskTools(workspaceRoot),
       ...getExecTools(workspaceRoot),
       ...getMergeTools(workspaceRoot),
-      ...getContextTools(workspaceRoot)
-      // Session tools removed - GitHub Copilot handles sessions natively
+      ...getContextTools(workspaceRoot),
+      ...getStatusTools(workspaceRoot)
     ])
 
-    this.hiveWatcher = new HiveWatcher(workspaceRoot, () => this.sidebarProvider?.refresh())
+    this.hiveWatcher = new HiveWatcher(workspaceRoot, () => {
+      this.sidebarProvider?.refresh()
+    })
     this.context.subscriptions.push({ dispose: () => this.hiveWatcher?.dispose() })
 
     if (this.creationWatcher) {
@@ -82,6 +85,8 @@ class HiveExtension {
   }
 
   private initializeWithoutHive(): void {
+    vscode.commands.executeCommand('setContext', 'hive.hasHiveRoot', false)
+    
     this.creationWatcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(this.workspaceFolder, '.hive/**')
     )
@@ -103,6 +108,15 @@ class HiveExtension {
     const workspaceFolder = this.workspaceFolder
 
     this.context.subscriptions.push(
+      vscode.commands.registerCommand('hive.initNest', async () => {
+        await initNest(workspaceFolder)
+        const newRoot = findHiveRoot(workspaceFolder)
+        if (newRoot && !this.initialized) {
+          this.workspaceRoot = newRoot
+          this.initializeWithHive(newRoot)
+        }
+      }),
+
       vscode.commands.registerCommand('hive.refresh', () => {
         if (!this.initialized) {
           const newRoot = findHiveRoot(workspaceFolder)
