@@ -127,12 +127,12 @@ Use \`hive_merge\` to explicitly integrate changes. Worktrees persist until manu
 **CRITICAL**: When resuming, a NEW worker spawns in the SAME worktree.
 The previous worker's progress is preserved. Include the user's decision in the \`decision\` parameter.
 
-**For research**, use MCP tools or OpenCode Task:
+**For research**, use MCP tools or parallel exploration:
 - \`grep_app_searchGitHub\` - Find code in OSS
 - \`context7_query-docs\` - Library documentation
 - \`websearch_web_search_exa\` - Web search via Exa
 - \`ast_grep_search\` - AST-based search
-- \`task({ subagent_type: "scout", prompt: "..." })\` - Comprehensive research
+- For exploratory fan-out, load \`hive_skill("parallel-exploration")\` and use \`background_task(agent: "scout-researcher", sync: false, ...)\`
 
 ### Planning Phase - Context Management REQUIRED
 

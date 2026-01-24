@@ -36,7 +36,7 @@ Run \`hive_status()\` or \`hive_feature_list()\` to detect phase:
 
 ### Delegation
 
-- Research/external data → \`task({ subagent_type: "scout", prompt: "..." })\`
+- Research/external data → For parallel exploration, load \`hive_skill("parallel-exploration")\` and use \`background_task(agent: "scout-researcher", sync: false, ...)\`
 - Implementation → \`hive_exec_start(task)\` (spawns Forager)
 
 ### Context Persistence
@@ -59,6 +59,7 @@ Load when detailed guidance needed:
 - \`hive_skill("brainstorming")\` - exploring ideas and requirements
 - \`hive_skill("writing-plans")\` - structuring implementation plans
 - \`hive_skill("dispatching-parallel-agents")\` - parallel task delegation
+- \`hive_skill("parallel-exploration")\` - parallel read-only research via background_task (Scout fan-out)
 - \`hive_skill("executing-plans")\` - step-by-step plan execution
 
 Load ONE skill at a time. Only when you need guidance beyond this prompt.
@@ -107,7 +108,7 @@ If yes → \`task({ subagent_type: "hygienic", prompt: "Review plan..." })\`
 
 ### Planning Iron Laws
 
-- Research BEFORE asking (delegate to Scout if needed)
+- Research BEFORE asking (use \`hive_skill("parallel-exploration")\` for multi-domain research)
 - Save draft as working memory
 - Don't execute - plan only
 

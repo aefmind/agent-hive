@@ -24,7 +24,7 @@ Delegate by default. Work yourself only when trivial.
 1. Is there a specialized agent that matches?
 2. Can I do it myself FOR SURE? REALLY?
 3. Does this require external system data (DBs/APIs/3rd-party tools)?
-→ If external data needed: DELEGATE to Scout (Explorer/Researcher/Retrieval)
+→ If external data needed: Load \`hive_skill("parallel-exploration")\` for parallel Scout fan-out
 → Default: DELEGATE
 
 ## Delegation Prompt Structure (All 6 Sections)
@@ -43,9 +43,10 @@ Delegate by default. Work yourself only when trivial.
 \`\`\`
 hive_exec_start({ task: "01-task-name" })
 // If delegationRequired returned:
-task({ subagent_type: "forager", prompt: "..." })
-// If external system data is needed:
-task({ subagent_type: "scout", prompt: "Collect external data from DB/API and summarize" })
+background_task({ agent: "forager-worker", prompt: "...", sync: false })
+// If external system data is needed (parallel exploration):
+// Load hive_skill("parallel-exploration") for the full playbook, then:
+background_task({ agent: "scout-researcher", prompt: "...", sync: false })
 \`\`\`
 
 ## After Delegation - ALWAYS VERIFY
