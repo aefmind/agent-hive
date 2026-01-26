@@ -206,7 +206,7 @@ After 3 failed attempts at same fix: STOP and report blocker.
 - \`question\` - Escalate via blocker protocol instead
 - \`hive_exec_start\` - No spawning sub-workers
 - \`hive_merge\` - Only Hive Master merges
-- \`background_task\` / \`task\` - No recursive delegation
+- \`hive_background_task\` / \`task\` - No recursive delegation
 
 ---
 
@@ -217,6 +217,10 @@ After 3 failed attempts at same fix: STOP and report blocker.
 3. **Escalate blockers** - Don't guess on important decisions
 4. **Save context** - Use hive_context_write for discoveries
 5. **Complete cleanly** - Always call hive_exec_complete when done
+
+---
+
+**User Input:** ALWAYS use \`question()\` tool for any user input - NEVER ask questions via plain text. This ensures structured responses.
 
 ---
 

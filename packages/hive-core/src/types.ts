@@ -145,6 +145,8 @@ export interface AgentModelConfig {
   temperature?: number;
   /** Skills to enable for this agent */
   skills?: string[];
+  /** Skills to auto-load for this agent */
+  autoLoadSkills?: string[];
   /** Variant key for model reasoning/effort level (e.g., 'low', 'medium', 'high', 'max') */
   variant?: string;
 }
@@ -160,6 +162,8 @@ export interface HiveConfig {
   disableMcps?: string[];
   /** Enable OMO-Slim delegation (optional integration) */
   omoSlimEnabled?: boolean;
+  /** Choose between unified or dedicated agent modes */
+  agentMode?: 'unified' | 'dedicated';
   /** Agent configuration */
   agents?: {
     /** Hive Master (hybrid planner + orchestrator) */
@@ -192,6 +196,7 @@ export const DEFAULT_HIVE_CONFIG: HiveConfig = {
   enableToolsFor: [],
   disableSkills: [],
   disableMcps: [],
+  agentMode: 'unified',
   agents: {
     'hive-master': {
       model: DEFAULT_AGENT_MODELS['hive-master'],
@@ -202,31 +207,36 @@ export const DEFAULT_HIVE_CONFIG: HiveConfig = {
         'dispatching-parallel-agents',
         'executing-plans',
       ],
+      autoLoadSkills: ['parallel-exploration'],
     },
     'architect-planner': {
       model: DEFAULT_AGENT_MODELS['architect-planner'],
       temperature: 0.7,
       skills: ['brainstorming', 'writing-plans'],
+      autoLoadSkills: ['parallel-exploration'],
     },
     'swarm-orchestrator': {
       model: DEFAULT_AGENT_MODELS['swarm-orchestrator'],
       temperature: 0.5,
       skills: ['dispatching-parallel-agents', 'executing-plans'],
+      autoLoadSkills: [],
     },
     'scout-researcher': {
       model: DEFAULT_AGENT_MODELS['scout-researcher'],
       temperature: 0.5,
       skills: [],
+      autoLoadSkills: ['parallel-exploration'],
     },
     'forager-worker': {
       model: DEFAULT_AGENT_MODELS['forager-worker'],
       temperature: 0.3,
-      skills: ['test-driven-development', 'verification-before-completion'],
+      autoLoadSkills: ['test-driven-development', 'verification-before-completion'],
     },
     'hygienic-reviewer': {
       model: DEFAULT_AGENT_MODELS['hygienic-reviewer'],
       temperature: 0.3,
       skills: ['systematic-debugging'],
+      autoLoadSkills: [],
     },
   },
 };

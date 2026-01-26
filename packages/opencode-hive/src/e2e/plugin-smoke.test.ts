@@ -5,6 +5,7 @@ import * as path from "path";
 import type { PluginInput } from "@opencode-ai/plugin";
 import { createOpencodeClient } from "@opencode-ai/sdk";
 import plugin from "../index";
+import { BUILTIN_SKILLS } from "../skills/registry.generated.js";
 
 const OPENCODE_CLIENT = createOpencodeClient({ baseUrl: "http://localhost:1" });
 
@@ -34,9 +35,9 @@ const EXPECTED_TOOLS = [
   "hive_context_write",
   "hive_status",
   "hive_skill",
-  "background_task",
-  "background_output",
-  "background_cancel",
+  "hive_background_task",
+  "hive_background_output",
+  "hive_background_cancel",
 ] as const;
 
 const TEST_ROOT_BASE = "/tmp/hive-e2e-plugin";
@@ -91,12 +92,14 @@ function createProject(worktree: string): PluginInput["project"] {
 
 describe("e2e: opencode-hive plugin (in-process)", () => {
   let testRoot: string;
+  let originalHome: string | undefined;
 
   beforeEach(() => {
+    originalHome = process.env.HOME;
     fs.rmSync(TEST_ROOT_BASE, { recursive: true, force: true });
     fs.mkdirSync(TEST_ROOT_BASE, { recursive: true });
     testRoot = fs.mkdtempSync(path.join(TEST_ROOT_BASE, "project-"));
-
+    process.env.HOME = testRoot;
     execSync("git init", { cwd: testRoot });
     execSync('git config user.email "test@example.com"', { cwd: testRoot });
     execSync('git config user.name "Test"', { cwd: testRoot });
@@ -107,6 +110,11 @@ describe("e2e: opencode-hive plugin (in-process)", () => {
 
   afterEach(() => {
     fs.rmSync(TEST_ROOT_BASE, { recursive: true, force: true });
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
   });
 
   it("registers expected tools and basic workflow works", async () => {
@@ -213,13 +221,52 @@ Do it
       { feature: "smoke-feature" },
       toolContext
     );
-    const status = JSON.parse(statusOutput as string) as { hint?: string };
+    const status = JSON.parse(statusOutput as string) as {
+      hint?: string;
+      summary?: { stuckWorkers?: number };
+      workers?: Array<{
+        activity?: {
+          elapsedMs: number;
+          elapsedFormatted: string;
+          messageCount: number;
+          lastActivityAgo: string;
+          lastMessagePreview: string | null;
+          maybeStuck: boolean;
+        };
+      }>;
+    };
 
     expect(status.hint).toContain("Wait for the completion notification");
     expect(status.hint).toContain("spot checks");
+    expect(status.workers?.length).toBeGreaterThan(0);
+
+    const workerActivity = status.workers?.[0]?.activity;
+    expect(workerActivity).toBeDefined();
+    expect(typeof workerActivity?.elapsedMs).toBe("number");
+    expect(typeof workerActivity?.elapsedFormatted).toBe("string");
+    expect(typeof workerActivity?.messageCount).toBe("number");
+    expect(typeof workerActivity?.lastActivityAgo).toBe("string");
+    expect(typeof workerActivity?.maybeStuck).toBe("boolean");
+    expect(
+      workerActivity?.lastMessagePreview === null ||
+        typeof workerActivity?.lastMessagePreview === "string"
+    ).toBe(true);
+    expect(typeof status.summary?.stuckWorkers).toBe("number");
   });
 
   it("system prompt hook injects Hive instructions", async () => {
+    const configPath = path.join(process.env.HOME || "", ".config", "opencode", "agent_hive.json");
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        agents: {
+          "hive-master": {
+            autoLoadSkills: ["brainstorming"],
+          },
+        },
+      }),
+    );
     const ctx: PluginInput = {
       directory: testRoot,
       worktree: testRoot,
@@ -234,10 +281,84 @@ Do it
     await hooks.tool!.hive_feature_create.execute({ name: "active" }, createToolContext("sess"));
 
     const output = { system: [] as string[] };
-    await hooks["experimental.chat.system.transform"]?.({}, output);
+    await hooks["experimental.chat.system.transform"]?.({ agent: "hive-master" }, output);
+    output.system.push("## Base Agent Prompt");
 
     const joined = output.system.join("\n");
     expect(joined).toContain("## Hive - Feature Development System");
     expect(joined).toContain("hive_feature_create");
+    
+    // Verify auto-load skill injection: brainstorming skill content should be present
+    const brainstormingSkill = BUILTIN_SKILLS.find((skill) => skill.name === "brainstorming");
+    expect(brainstormingSkill).toBeDefined();
+    expect(joined).toContain(brainstormingSkill!.template.slice(0, 50)); // Check first 50 chars of template
+    
+    // Verify ordering: HIVE_SYSTEM_PROMPT → autoLoad skills → status hint → base agent prompt
+    const hiveSystemIndex = output.system.findIndex((entry) =>
+      entry.includes("## Hive - Feature Development System"),
+    );
+    const brainstormingIndex = output.system.findIndex(
+      (entry) => brainstormingSkill && entry.includes(brainstormingSkill.template.slice(0, 50)),
+    );
+    const statusHintIndex = output.system.findIndex((entry) =>
+      entry.includes("### Current Hive Status"),
+    );
+    const agentPromptIndex = output.system.findIndex((entry) =>
+      entry.includes("## Base Agent Prompt"),
+    );
+
+    expect(hiveSystemIndex).toBeGreaterThanOrEqual(0);
+    expect(brainstormingIndex).toBeGreaterThan(hiveSystemIndex);
+    expect(statusHintIndex).toBeGreaterThan(brainstormingIndex);
+    expect(agentPromptIndex).toBeGreaterThan(statusHintIndex);
+  });
+
+  it("auto-loads parallel exploration for planner agents by default", async () => {
+    const ctx: PluginInput = {
+      directory: testRoot,
+      worktree: testRoot,
+      serverUrl: new URL("http://localhost:1"),
+      project: createProject(testRoot),
+      client: OPENCODE_CLIENT,
+      $: createStubShell(),
+    };
+
+    const hooks = await plugin(ctx);
+
+    const onboardingSnippet = "# Onboarding Preferences";
+    const parallelExplorationSkill = BUILTIN_SKILLS.find(
+      (skill) => skill.name === "parallel-exploration",
+    );
+    expect(parallelExplorationSkill).toBeDefined();
+
+    const masterOutput = { system: [] as string[] };
+    await hooks["experimental.chat.system.transform"]?.(
+      { agent: "hive-master" },
+      masterOutput,
+    );
+    expect(masterOutput.system.join("\n")).toContain(
+      parallelExplorationSkill!.template.slice(0, 50),
+    );
+    expect(masterOutput.system.join("\n")).not.toContain(onboardingSnippet);
+
+    const architectOutput = { system: [] as string[] };
+    await hooks["experimental.chat.system.transform"]?.(
+      { agent: "architect-planner" },
+      architectOutput,
+    );
+    expect(architectOutput.system.join("\n")).toContain(
+      parallelExplorationSkill!.template.slice(0, 50),
+    );
+    expect(architectOutput.system.join("\n")).not.toContain(onboardingSnippet);
+
+    const foragerOutput = { system: [] as string[] };
+    await hooks["experimental.chat.system.transform"]?.(
+      { agent: "forager-worker" },
+      foragerOutput,
+    );
+    expect(foragerOutput.system.join("\n")).not.toContain(
+      parallelExplorationSkill!.template.slice(0, 50),
+    );
+    expect(foragerOutput.system.join("\n")).not.toContain(onboardingSnippet);
   });
 });

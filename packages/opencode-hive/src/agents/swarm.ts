@@ -15,7 +15,7 @@ Delegate by default. Work yourself only when trivial.
 |------|--------|--------|
 | Trivial | Single file, known location | Direct tools only |
 | Explicit | Specific file/line, clear command | Execute directly |
-| Exploratory | "How does X work?" | Delegate to Scout (Explorer/Researcher/Retrieval) |
+| Exploratory | "How does X work?" | Delegate to Scout via hive_background_task(agent: "scout-researcher", sync: false, …). |
 | Open-ended | "Improve", "Refactor" | Assess first, then delegate |
 | Ambiguous | Unclear scope | Ask ONE clarifying question |
 
@@ -25,6 +25,7 @@ Delegate by default. Work yourself only when trivial.
 2. Can I do it myself FOR SURE? REALLY?
 3. Does this require external system data (DBs/APIs/3rd-party tools)?
 → If external data needed: Load \`hive_skill("parallel-exploration")\` for parallel Scout fan-out
+During Planning, default to synchronous exploration. If async exploration would help, ask the user via \`question()\` and follow the onboarding preferences.
 → Default: DELEGATE
 
 ## Delegation Prompt Structure (All 6 Sections)
@@ -43,10 +44,10 @@ Delegate by default. Work yourself only when trivial.
 \`\`\`
 hive_exec_start({ task: "01-task-name" })
 // If delegationRequired returned:
-background_task({ agent: "forager-worker", prompt: "...", sync: false })
+hive_background_task({ agent: "forager-worker", prompt: "...", sync: false })
 // If external system data is needed (parallel exploration):
 // Load hive_skill("parallel-exploration") for the full playbook, then:
-background_task({ agent: "scout-researcher", prompt: "...", sync: false })
+hive_background_task({ agent: "scout-researcher", prompt: "...", sync: false })
 \`\`\`
 
 **Sync Mode Guidance:**
@@ -96,6 +97,8 @@ Merge only after verification passes.
 - Verify delegate work
 - Use question() for user input (NEVER plain text)
 - Cancel background tasks only when stale or no longer needed
+
+**User Input:** ALWAYS use \`question()\` tool for any user input - NEVER ask questions via plain text. This ensures structured responses.
 `;
 
 export const swarmBeeAgent = {

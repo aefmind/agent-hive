@@ -5,9 +5,9 @@
  * background tasks that execute in separate OpenCode sessions.
  * 
  * Tools:
- * - background_task: Spawn a new background task
- * - background_output: Get output from a running/completed task
- * - background_cancel: Cancel running task(s)
+ * - hive_background_task: Spawn a new background task
+ * - hive_background_output: Get output from a running/completed task
+ * - hive_background_cancel: Cancel running task(s)
  */
 
 import { tool, type ToolDefinition } from '@opencode-ai/plugin';
@@ -20,9 +20,10 @@ import {
 } from '../background/index.js';
 import { isHiveAgent, normalizeVariant } from '../hooks/variant-hook.js';
 import { resolvePromptFromFile, findWorkspaceRoot } from '../utils/prompt-file.js';
+import { formatElapsed, formatRelativeTime } from '../utils/format.js';
 
 /**
- * Output format for background_task tool.
+ * Output format for hive_background_task tool.
  */
 interface BackgroundTaskOutput {
   provider: 'hive';
@@ -69,9 +70,9 @@ export function createBackgroundTools(
   client: OpencodeClient,
   configService?: ConfigService
 ): {
-  background_task: ToolDefinition;
-  background_output: ToolDefinition;
-  background_cancel: ToolDefinition;
+  hive_background_task: ToolDefinition;
+  hive_background_output: ToolDefinition;
+  hive_background_cancel: ToolDefinition;
 } {
   async function maybeFinalizeIfIdle(sessionId: string): Promise<void> {
     // Fast-path: if the client exposes batch status, use it.
@@ -107,8 +108,8 @@ export function createBackgroundTools(
     /**
      * Spawn a new background task.
      */
-    background_task: tool({
-      description: 'Spawn a background agent task. Use sync=true to wait for completion (returns output). If sync=false (default), the parent session receives a completion <system-reminder> and you can call background_output to fetch the result.',
+    hive_background_task: tool({
+      description: 'Spawn a background agent task. Use sync=true to wait for completion (returns output). If sync=false (default), the parent session receives a completion <system-reminder> and you can call hive_background_output to fetch the result.',
       args: {
         agent: tool.schema.string().describe('Agent to use (e.g., "forager-worker", "scout-researcher")'),
         prompt: tool.schema.string().optional().describe('Task instructions/prompt (required if promptFile not provided)'),
@@ -288,15 +289,15 @@ export function createBackgroundTools(
     /**
      * Get output from a background task.
      */
-    background_output: tool({
-      description: 'Get output from a background task. For sync=false tasks, wait for the completion <system-reminder> and then call with block=false to fetch the result; use block=true only when you need interim output.',
+    hive_background_output: tool({
+      description: 'Get output from a background task. For sync=false tasks, wait for the completion <system-reminder> and then call with block=false to fetch the result; use block=true only when you need interim output. When blocking, pick a timeout based on task complexity (typically 30-120s).',
       args: {
         task_id: tool.schema.string().describe('Task ID to get output from'),
         block: tool.schema.boolean().optional().describe('Block waiting for new output (default: false)'),
-        timeout: tool.schema.number().optional().describe('Timeout in ms when blocking (default: 30000)'),
+        timeout: tool.schema.number().optional().describe('Timeout in ms when blocking (default: 60000)'),
         cursor: tool.schema.string().optional().describe('Cursor for incremental output (message count)'),
       },
-      async execute({ task_id, block = false, timeout = 30000, cursor }): Promise<string> {
+      async execute({ task_id, block = false, timeout = 60000, cursor }): Promise<string> {
         const task = manager.getTask(task_id);
         if (!task) {
           return JSON.stringify({
@@ -359,6 +360,23 @@ export function createBackgroundTools(
         // Get messages from session
         const output = await getTaskOutput(client, finalized.sessionId, cursorCount);
         const messageCount = finalized.progress?.messageCount ?? 0;
+        const observationSnapshot = manager.getTaskObservation(task_id);
+        const lastActivityAt = observationSnapshot?.lastActivityAt ?? null;
+        const startedAt = finalized.startedAt ? new Date(finalized.startedAt).getTime() : Date.now();
+        const elapsedMs = Date.now() - startedAt;
+        const lastMessage = finalized.progress?.lastMessage;
+        const lastMessagePreview = lastMessage
+          ? `${lastMessage.slice(0, 200)}${lastMessage.length > 200 ? '...' : ''}`
+          : null;
+        const observation = {
+          elapsedMs,
+          elapsedFormatted: formatElapsed(elapsedMs),
+          messageCount: observationSnapshot?.messageCount ?? 0,
+          lastActivityAgo: lastActivityAt ? formatRelativeTime(lastActivityAt) : 'never',
+          lastActivityAt,
+          lastMessagePreview,
+          maybeStuck: observationSnapshot?.maybeStuck ?? false,
+        };
 
         return JSON.stringify({
           task_id: finalized.taskId,
@@ -368,6 +386,7 @@ export function createBackgroundTools(
           output,
           cursor: messageCount.toString(),
           progress: finalized.progress,
+          observation,
         }, null, 2);
       },
     }),
@@ -375,7 +394,7 @@ export function createBackgroundTools(
     /**
      * Cancel background task(s).
      */
-    background_cancel: tool({
+    hive_background_cancel: tool({
       description: 'Cancel running background task(s). Use all=true to cancel all tasks for current session.',
       args: {
         task_id: tool.schema.string().optional().describe('Specific task ID to cancel'),
