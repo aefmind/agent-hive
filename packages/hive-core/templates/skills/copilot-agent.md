@@ -47,10 +47,11 @@ After all tasks merged:
 3. **Wait for approval** - Don't execute until user approves
 4. **One task at a time** - Complete and merge before starting next
 5. **Squash merges** - Keep clean history with one commit per task
+6. **Questions only when important** - Ask only when essential and batch all questions into a single ask
 
 ## Parallel Execution with runSubagent
 
-For independent tasks, use `#tool:runSubagent` to delegate:
+For independent tasks, use `#tool:runSubagent` to delegate. Do not switch models; delegate only with runSubagent.
 
 ```
 Use #tool:runSubagent to execute task "2-add-token-refresh":
