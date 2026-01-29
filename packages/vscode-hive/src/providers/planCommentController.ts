@@ -132,7 +132,8 @@ export class PlanCommentController {
   }
 
   private getCommentsPath(uri: vscode.Uri): string | null {
-    const match = uri.fsPath.match(/\.hive\/features\/([^/]+)\/plan\.md$/)
+    const normalized = uri.fsPath.replace(/\\/g, "/")
+    const match = normalized.match(/\.hive\/features\/([^/]+)\/plan\.md$/)
     if (!match) return null
     return path.join(this.workspaceRoot, '.hive', 'features', match[1], 'comments.json')
   }
