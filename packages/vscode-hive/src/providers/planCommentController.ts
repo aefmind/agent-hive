@@ -105,17 +105,22 @@ export class PlanCommentController {
     const normalized = this.normalizePath(filePath)
     const normalizedWorkspace = this.normalizedWorkspaceRoot.replace(/\/+$/, '')
     if (!normalized.startsWith(`${normalizedWorkspace}/`)) return null
-    const match = normalized.match(/\.hive\/features\/([^/]+)\/(?:plan\.md|comments\.json)$/)
+    const match = filePath.replace(/\\/g, '/')
+      .match(/\.hive\/features\/([^/]+)\/(?:plan\.md|comments\.json)$/)
     return match ? match[1] : null
   }
 
   private normalizePath(filePath: string): string {
-    const normalized = filePath.replace(/\\/g, '/')
-    return process.platform === 'win32' ? normalized.toLowerCase() : normalized
+    return filePath.replace(/\\/g, '/')
   }
 
   private isSamePath(left: string, right: string): boolean {
-    return this.normalizePath(left) === this.normalizePath(right)
+    const normalizedLeft = this.normalizePath(left)
+    const normalizedRight = this.normalizePath(right)
+    if (process.platform === 'win32') {
+      return normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+    }
+    return normalizedLeft === normalizedRight
   }
 
   private createComment(reply: vscode.CommentReply): void {
