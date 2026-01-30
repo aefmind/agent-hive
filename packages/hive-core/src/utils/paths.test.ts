@@ -16,7 +16,9 @@ import {
   normalizePath,
 } from "./paths";
 
-const TEST_DIR = "/tmp/hive-core-test-" + process.pid;
+import * as os from "os";
+
+const TEST_DIR = path.join(os.tmpdir(), "hive-core-test-" + process.pid);
 
 function cleanup() {
   if (fs.existsSync(TEST_DIR)) {
@@ -171,9 +173,18 @@ describe("Atomic + Locked JSON Utilities", () => {
       fs.chmodSync(readonlyDir, 0o444);
 
       try {
-        expect(() => writeAtomic(filePath, "should fail")).toThrow();
+        if (process.platform === "win32") {
+          // On Windows chmod may not enforce read-only directory semantics; ensure operation does not leave temp files.
+          expect(() => writeAtomic(path.join(readonlyDir, "maybe-success.txt"), "maybe success on windows")).not.toThrow();
+        } else {
+          expect(() => writeAtomic(filePath, "should fail")).toThrow();
+        }
       } finally {
-        fs.chmodSync(readonlyDir, 0o755);
+        try {
+          fs.chmodSync(readonlyDir, 0o755);
+        } catch {
+          // ignore
+        }
       }
 
       // No temp files should remain

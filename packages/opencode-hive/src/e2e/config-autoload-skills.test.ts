@@ -7,7 +7,9 @@ import { BUILTIN_SKILLS } from "../skills/registry.generated.js";
 
 const OPENCODE_CLIENT = createOpencodeClient({ baseUrl: "http://localhost:1" });
 
-const TEST_ROOT_BASE = "/tmp/hive-config-autoload-skills-test";
+import * as os from "os";
+
+const TEST_ROOT_BASE = path.join(os.tmpdir(), "hive-config-autoload-skills-test");
 
 function createProject(worktree: string) {
   return {

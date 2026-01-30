@@ -18,82 +18,82 @@ export function normalizePath(filePath: string): string {
 }
 
 export function getHivePath(projectRoot: string): string {
-  return path.join(projectRoot, HIVE_DIR);
+  return normalizePath(path.join(projectRoot, HIVE_DIR));
 }
 
 export function getJournalPath(projectRoot: string): string {
-  return path.join(getHivePath(projectRoot), JOURNAL_FILE);
+  return normalizePath(path.join(getHivePath(projectRoot), JOURNAL_FILE));
 }
 
 export function getFeaturesPath(projectRoot: string): string {
-  return path.join(getHivePath(projectRoot), FEATURES_DIR);
+  return normalizePath(path.join(getHivePath(projectRoot), FEATURES_DIR));
 }
 
 export function getFeaturePath(projectRoot: string, featureName: string): string {
-  return path.join(getFeaturesPath(projectRoot), featureName);
+  return normalizePath(path.join(getFeaturesPath(projectRoot), featureName));
 }
 
 export function getPlanPath(projectRoot: string, featureName: string): string {
-  return path.join(getFeaturePath(projectRoot, featureName), PLAN_FILE);
+  return normalizePath(path.join(getFeaturePath(projectRoot, featureName), PLAN_FILE));
 }
 
 export function getCommentsPath(projectRoot: string, featureName: string): string {
-  return path.join(getFeaturePath(projectRoot, featureName), COMMENTS_FILE);
+  return normalizePath(path.join(getFeaturePath(projectRoot, featureName), COMMENTS_FILE));
 }
 
 export function getFeatureJsonPath(projectRoot: string, featureName: string): string {
-  return path.join(getFeaturePath(projectRoot, featureName), FEATURE_FILE);
+  return normalizePath(path.join(getFeaturePath(projectRoot, featureName), FEATURE_FILE));
 }
 
 export function getContextPath(projectRoot: string, featureName: string): string {
-  return path.join(getFeaturePath(projectRoot, featureName), CONTEXT_DIR);
+  return normalizePath(path.join(getFeaturePath(projectRoot, featureName), CONTEXT_DIR));
 }
 
 export function getTasksPath(projectRoot: string, featureName: string): string {
-  return path.join(getFeaturePath(projectRoot, featureName), TASKS_DIR);
+  return normalizePath(path.join(getFeaturePath(projectRoot, featureName), TASKS_DIR));
 }
 
 export function getTaskPath(projectRoot: string, featureName: string, taskFolder: string): string {
-  return path.join(getTasksPath(projectRoot, featureName), taskFolder);
+  return normalizePath(path.join(getTasksPath(projectRoot, featureName), taskFolder));
 }
 
 export function getTaskStatusPath(projectRoot: string, featureName: string, taskFolder: string): string {
-  return path.join(getTaskPath(projectRoot, featureName, taskFolder), STATUS_FILE);
+  return normalizePath(path.join(getTaskPath(projectRoot, featureName, taskFolder), STATUS_FILE));
 }
 
 export function getTaskReportPath(projectRoot: string, featureName: string, taskFolder: string): string {
-  return path.join(getTaskPath(projectRoot, featureName, taskFolder), REPORT_FILE);
+  return normalizePath(path.join(getTaskPath(projectRoot, featureName, taskFolder), REPORT_FILE));
 }
 
 export function getTaskSpecPath(projectRoot: string, featureName: string, taskFolder: string): string {
-  return path.join(getTaskPath(projectRoot, featureName, taskFolder), 'spec.md');
+  return normalizePath(path.join(getTaskPath(projectRoot, featureName, taskFolder), 'spec.md'));
 }
 
 export function getApprovedPath(projectRoot: string, featureName: string): string {
-  return path.join(getFeaturePath(projectRoot, featureName), APPROVED_FILE);
+  return normalizePath(path.join(getFeaturePath(projectRoot, featureName), APPROVED_FILE));
 }
 
 const SUBTASKS_DIR = 'subtasks';
 const SPEC_FILE = 'spec.md';
 
 export function getSubtasksPath(projectRoot: string, featureName: string, taskFolder: string): string {
-  return path.join(getTaskPath(projectRoot, featureName, taskFolder), SUBTASKS_DIR);
+  return normalizePath(path.join(getTaskPath(projectRoot, featureName, taskFolder), SUBTASKS_DIR));
 }
 
 export function getSubtaskPath(projectRoot: string, featureName: string, taskFolder: string, subtaskFolder: string): string {
-  return path.join(getSubtasksPath(projectRoot, featureName, taskFolder), subtaskFolder);
+  return normalizePath(path.join(getSubtasksPath(projectRoot, featureName, taskFolder), subtaskFolder));
 }
 
 export function getSubtaskStatusPath(projectRoot: string, featureName: string, taskFolder: string, subtaskFolder: string): string {
-  return path.join(getSubtaskPath(projectRoot, featureName, taskFolder, subtaskFolder), STATUS_FILE);
+  return normalizePath(path.join(getSubtaskPath(projectRoot, featureName, taskFolder, subtaskFolder), STATUS_FILE));
 }
 
 export function getSubtaskSpecPath(projectRoot: string, featureName: string, taskFolder: string, subtaskFolder: string): string {
-  return path.join(getSubtaskPath(projectRoot, featureName, taskFolder, subtaskFolder), SPEC_FILE);
+  return normalizePath(path.join(getSubtaskPath(projectRoot, featureName, taskFolder, subtaskFolder), SPEC_FILE));
 }
 
 export function getSubtaskReportPath(projectRoot: string, featureName: string, taskFolder: string, subtaskFolder: string): string {
-  return path.join(getSubtaskPath(projectRoot, featureName, taskFolder, subtaskFolder), REPORT_FILE);
+  return normalizePath(path.join(getSubtaskPath(projectRoot, featureName, taskFolder, subtaskFolder), REPORT_FILE));
 }
 
 export function ensureDir(dirPath: string): void {
@@ -173,6 +173,10 @@ export async function acquireLock(
 ): Promise<() => void> {
   const opts = { ...DEFAULT_LOCK_OPTIONS, ...options };
   const lockPath = getLockPath(filePath);
+
+  // Ensure parent directory exists for lock file (fixes Windows root path handling)
+  ensureDir(path.dirname(lockPath));
+
   const startTime = Date.now();
   const lockContent = JSON.stringify({
     pid: process.pid,
@@ -182,11 +186,9 @@ export async function acquireLock(
 
   while (true) {
     try {
-      // Attempt exclusive create (O_CREAT | O_EXCL | O_WRONLY)
-      const fd = fs.openSync(lockPath, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY);
-      fs.writeSync(fd, lockContent);
-      fs.closeSync(fd);
-      
+      // Attempt exclusive create using atomic write with 'wx' flag
+      fs.writeFileSync(lockPath, lockContent, { flag: 'wx' });
+
       // Lock acquired - return release function
       return () => {
         try {
@@ -234,6 +236,10 @@ export function acquireLockSync(
 ): () => void {
   const opts = { ...DEFAULT_LOCK_OPTIONS, ...options };
   const lockPath = getLockPath(filePath);
+
+  // Ensure parent directory exists for lock file (fixes Windows root path handling)
+  ensureDir(path.dirname(lockPath));
+
   const startTime = Date.now();
   const lockContent = JSON.stringify({
     pid: process.pid,
@@ -243,9 +249,8 @@ export function acquireLockSync(
 
   while (true) {
     try {
-      const fd = fs.openSync(lockPath, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY);
-      fs.writeSync(fd, lockContent);
-      fs.closeSync(fd);
+      // Attempt exclusive create using atomic write with 'wx' flag
+      fs.writeFileSync(lockPath, lockContent, { flag: 'wx' });
       
       return () => {
         try {

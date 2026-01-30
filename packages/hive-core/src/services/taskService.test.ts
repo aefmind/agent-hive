@@ -5,7 +5,9 @@ import { TaskService, TASK_STATUS_SCHEMA_VERSION } from "./taskService";
 import { TaskStatus } from "../types";
 import { getLockPath, readJson } from "../utils/paths";
 
-const TEST_DIR = "/tmp/hive-core-taskservice-test-" + process.pid;
+import * as os from "os";
+
+const TEST_DIR = path.join(os.tmpdir(), "hive-core-taskservice-test-" + process.pid);
 const PROJECT_ROOT = TEST_DIR;
 
 function cleanup() {

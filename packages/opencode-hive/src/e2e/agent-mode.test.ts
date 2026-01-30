@@ -6,7 +6,9 @@ import plugin from "../index";
 
 const OPENCODE_CLIENT = createOpencodeClient({ baseUrl: "http://localhost:1" });
 
-const TEST_ROOT_BASE = "/tmp/hive-agent-mode-test";
+import * as os from "os";
+
+const TEST_ROOT_BASE = path.join(os.tmpdir(), "hive-agent-mode-test");
 
 function createProject(worktree: string) {
   return {

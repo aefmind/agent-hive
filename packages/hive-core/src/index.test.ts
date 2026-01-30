@@ -1,10 +1,13 @@
 import { describe, expect, it } from "bun:test";
-import { getHivePath } from "./utils/paths";
+import * as os from "os";
+import * as path from "path";
+import { getHivePath, normalizePath } from "./utils/paths";
 import { detectContext } from "./utils/detection";
 
 describe("hive-core", () => {
   it("exports path helpers", () => {
-    expect(getHivePath("/tmp/project")).toBe("/tmp/project/.hive");
+    const tmpProject = path.join(os.tmpdir(), "project");
+    expect(getHivePath(tmpProject)).toBe(normalizePath(path.join(tmpProject, ".hive")));
   });
 
   it("detects worktree paths on Windows", () => {

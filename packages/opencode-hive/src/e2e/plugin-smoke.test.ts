@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
 import type { PluginInput } from "@opencode-ai/plugin";
 import { createOpencodeClient } from "@opencode-ai/sdk";
 import plugin from "../index";
@@ -40,7 +41,7 @@ const EXPECTED_TOOLS = [
   "hive_background_cancel",
 ] as const;
 
-const TEST_ROOT_BASE = "/tmp/hive-e2e-plugin";
+const TEST_ROOT_BASE = path.join(os.tmpdir(), "hive-e2e-plugin");
 
 function createStubShell(): PluginInput["$"] {
   let shell: PluginInput["$"];

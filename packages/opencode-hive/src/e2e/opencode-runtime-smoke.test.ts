@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
 import { createServer } from "net";
 import {
   createOpencodeClient,
@@ -94,7 +95,19 @@ async function getFreePort(): Promise<number> {
 }
 
 function safeRm(dir: string) {
-  fs.rmSync(dir, { recursive: true, force: true });
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch (err: unknown) {
+    const e = err as NodeJS.ErrnoException;
+    // On Windows, directories can be busy or locked; don't fail tests due to transient OS locking.
+    if (e && (e.code === 'EBUSY' || e.code === 'EPERM')) {
+      console.warn(`[hive] safeRm: unable to remove ${dir}: ${e.code}. Continuing.`);
+      return;
+    }
+    // Missing directory is fine
+    if (e && e.code === 'ENOENT') return;
+    throw err;
+  }
 }
 
 function pickHivePluginEntry(): string {
@@ -159,7 +172,7 @@ async function waitForTools(
 
 describe("e2e: OpenCode runtime loads opencode-hive", () => {
   it("exposes hive tools via /experimental/tool/ids", async () => {
-    const tmpBase = "/tmp/hive-e2e-runtime";
+    const tmpBase = path.join(os.tmpdir(), "hive-e2e-runtime");
     safeRm(tmpBase);
     fs.mkdirSync(tmpBase, { recursive: true });
 
@@ -171,6 +184,7 @@ describe("e2e: OpenCode runtime loads opencode-hive", () => {
     const pluginFile = path.join(projectDir, ".opencode", "plugin", "hive.ts");
     const pluginSource = `import hive from ${JSON.stringify(hivePluginEntry)}\nexport const HivePlugin = hive\n`;
     fs.writeFileSync(pluginFile, pluginSource);
+    console.log('[hive] wrote pluginFile', pluginFile, 'exists:', fs.existsSync(pluginFile));
 
     const previousCwd = process.cwd();
     const previousConfigDir = process.env.OPENCODE_CONFIG_DIR;
