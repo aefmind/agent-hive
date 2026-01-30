@@ -1,12 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
 import { createOpencodeClient } from "@opencode-ai/sdk";
 import plugin from "../index";
 
 const OPENCODE_CLIENT = createOpencodeClient({ baseUrl: "http://localhost:1" });
-
-import * as os from "os";
 
 const TEST_ROOT_BASE = path.join(os.tmpdir(), "hive-agent-mode-test");
 

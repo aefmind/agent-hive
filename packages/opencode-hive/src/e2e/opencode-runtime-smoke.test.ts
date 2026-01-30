@@ -204,7 +204,7 @@ describe("e2e: OpenCode runtime loads opencode-hive", () => {
 
     const config: OpencodeConfig = {
       plugin: [],
-      logLevel: "ERROR",
+      logLevel: "ERROR", // FIXME: logLevel is not a valid property. Use a valid replacement or remove it.
     };
 
     let server: Awaited<ReturnType<typeof createOpencodeServer>> | null = null;
@@ -225,7 +225,8 @@ describe("e2e: OpenCode runtime loads opencode-hive", () => {
       baseUrl: server.url,
       responseStyle: "data",
       throwOnError: true,
-      directory: projectDir,
+      directory: projectDir, // FIXME: directory is not a valid property. Use a valid replacement or remove it.
+
     });
 
     const abortController = new AbortController();

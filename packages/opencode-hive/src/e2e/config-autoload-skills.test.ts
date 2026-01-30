@@ -1,13 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { createOpencodeClient } from "@opencode-ai/sdk";
 import plugin from "../index";
 import { BUILTIN_SKILLS } from "../skills/registry.generated.js";
 
 const OPENCODE_CLIENT = createOpencodeClient({ baseUrl: "http://localhost:1" });
-
-import * as os from "os";
 
 const TEST_ROOT_BASE = path.join(os.tmpdir(), "hive-config-autoload-skills-test");
 
