@@ -104,7 +104,9 @@ export class PlanCommentController {
   private getFeatureMatch(filePath: string): string | null {
     const normalized = this.normalizePath(filePath)
     const normalizedWorkspace = this.normalizedWorkspaceRoot.replace(/\/+$/, '')
-    if (!normalized.startsWith(`${normalizedWorkspace}/`)) return null
+    const compareNormalized = process.platform === 'win32' ? normalized.toLowerCase() : normalized
+    const compareWorkspace = process.platform === 'win32' ? normalizedWorkspace.toLowerCase() : normalizedWorkspace
+    if (!compareNormalized.startsWith(`${compareWorkspace}/`)) return null
     const match = filePath.replace(/\\/g, '/')
       .match(/\.hive\/features\/([^/]+)\/(?:plan\.md|comments\.json)$/)
     return match ? match[1] : null
